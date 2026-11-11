@@ -1,0 +1,35 @@
+[project]
+name = "stockhunter-ai"
+version = "0.1.0"
+description = "StockHunter AI — moteur de recherche, d'analyse et de suivi d'opportunités actions (analyse uniquement, aucun ordre réel)."
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "httpx>=0.27",
+    "pydantic-settings>=2.2",
+    "pandas>=2.2",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]
+dev = ["pytest>=8", "respx>=0.21"]
+
+[project.scripts]
+stockhunter = "stockhunter.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["stockhunter*"]
+
+[tool.setuptools.package-data]
+stockhunter = ["universe/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["live: appels réseau réels vers les API (désactivés par défaut, lancer avec -m live)"]

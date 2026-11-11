@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]" pyflakes
+      - run: python -m pyflakes stockhunter/data stockhunter/cli.py stockhunter/jobs tests
+      - name: Migrations à jour avec les modèles
+        run: |
+          SH_DATABASE_URL=sqlite:///ci.db alembic upgrade head
+          SH_DATABASE_URL=sqlite:///ci.db alembic check
+      - run: pytest -m "not live"
+
+  live-sources:
+    # Vérification réelle des API, uniquement si les secrets sont configurés dans le dépôt
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest -m live -rs
+        env:
+          SH_SEC_USER_AGENT: ${{ secrets.SH_SEC_USER_AGENT }}
+          SH_TIINGO_API_KEY: ${{ secrets.SH_TIINGO_API_KEY }}
+          SH_FRED_API_KEY: ${{ secrets.SH_FRED_API_KEY }}

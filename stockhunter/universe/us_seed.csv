@@ -1,0 +1,59 @@
+symbol,asset_type,role,sector
+SPY,etf,benchmark,Benchmark
+QQQ,etf,benchmark,Benchmark
+IWM,etf,benchmark,Benchmark
+DIA,etf,benchmark,Benchmark
+XLK,etf,sector_etf,Technology
+XLF,etf,sector_etf,Financials
+XLV,etf,sector_etf,Health Care
+XLE,etf,sector_etf,Energy
+XLI,etf,sector_etf,Industrials
+XLY,etf,sector_etf,Consumer Discretionary
+XLP,etf,sector_etf,Consumer Staples
+XLU,etf,sector_etf,Utilities
+XLB,etf,sector_etf,Materials
+XLRE,etf,sector_etf,Real Estate
+XLC,etf,sector_etf,Communication Services
+SMH,etf,sector_etf,Semiconductors
+AAPL,stock,candidate,
+MSFT,stock,candidate,
+NVDA,stock,candidate,
+AMZN,stock,candidate,
+GOOGL,stock,candidate,
+META,stock,candidate,
+AVGO,stock,candidate,
+AMD,stock,candidate,
+ORCL,stock,candidate,
+CRM,stock,candidate,
+ADBE,stock,candidate,
+NOW,stock,candidate,
+PANW,stock,candidate,
+CRWD,stock,candidate,
+TSLA,stock,candidate,
+NFLX,stock,candidate,
+COST,stock,candidate,
+WMT,stock,candidate,
+HD,stock,candidate,
+MCD,stock,candidate,
+NKE,stock,candidate,
+JPM,stock,candidate,
+GS,stock,candidate,
+V,stock,candidate,
+MA,stock,candidate,
+LLY,stock,candidate,
+UNH,stock,candidate,
+JNJ,stock,candidate,
+ABBV,stock,candidate,
+ISRG,stock,candidate,
+XOM,stock,candidate,
+CVX,stock,candidate,
+CAT,stock,candidate,
+GE,stock,candidate,
+DE,stock,candidate,
+LMT,stock,candidate,
+UBER,stock,candidate,
+LIN,stock,candidate,
+NEE,stock,candidate,
+PLD,stock,candidate,
+KO,stock,candidate,
+PG,stock,candidate,
