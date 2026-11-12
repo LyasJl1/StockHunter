@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -62,17 +63,18 @@ class MarketStore:
 def split_factors(splits: pd.DataFrame, dates: pd.Series, tickers: pd.Series) -> pd.Series:
     """Facteur multiplicatif à appliquer au prix brut d'une séance pour le rendre comparable aux prix
     actuels : produit de split_from/split_to de tous les splits exécutés APRÈS cette séance.
-    (Un split le jour J s'applique aux barres antérieures à J ; la barre de J est déjà post-split.)"""
-    out = pd.Series(1.0, index=dates.index)
+    (Un split le jour J s'applique aux barres antérieures à J ; la barre de J est déjà post-split.)
+    Coût proportionnel aux seules lignes des titres concernés (≈ 5 M de lignes en quelques secondes)."""
+    out = np.ones(len(dates))
     if splits is None or splits.empty:
-        return out
+        return pd.Series(out, index=dates.index)
+    positions = pd.Series(np.arange(len(tickers)), index=tickers.to_numpy()).groupby(level=0).indices
+    dvals = pd.to_datetime(dates).to_numpy()
     for tk, g in splits.groupby("ticker"):
-        mask = tickers == tk
-        if not mask.any():
+        pos = positions.get(tk)
+        if pos is None:
             continue
-        d = dates[mask]
-        f = pd.Series(1.0, index=d.index)
-        for _, s in g.iterrows():
-            f[d < pd.Timestamp(s["execution_date"])] *= s["split_from"] / s["split_to"]
-        out[mask] = f
-    return out
+        pos = np.asarray(pos)
+        for ex, ratio in zip(pd.to_datetime(g["execution_date"]).to_numpy(), (g["split_from"] / g["split_to"]).to_numpy()):
+            out[pos[dvals[pos] < ex]] *= ratio
+    return pd.Series(out, index=dates.index)

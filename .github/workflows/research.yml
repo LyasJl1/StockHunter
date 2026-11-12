@@ -1,0 +1,53 @@
+name: Recherche univers large
+
+# Étude pré-enregistrée (docs/research/2026-11-12-preenregistrement-univers-large.md) sur les données
+# du marché complet déjà stockées dans le cache. Aucun appel API.
+on:
+  workflow_dispatch:
+    inputs:
+      holdout:
+        description: "Évaluer aussi la période réservée (UNE seule fois, après lecture des résultats de développement)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ingestion
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SH_DATABASE_URL: sqlite:///var/stockhunter.db
+      SH_MARKET_DIR: var/market
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+
+      - name: Restaurer la base et les données de marché
+        uses: actions/cache/restore@v5
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+          restore-keys: stockhunter-db-
+
+      - name: Migrations
+        run: stockhunter init-db
+
+      - name: Étude
+        run: |
+          stockhunter market status
+          stockhunter research broad --out research-report.md ${{ inputs.holdout && '--holdout' || '' }} > /dev/null
+          cat research-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publier le rapport
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: research-report
+          path: research-report.md
+          retention-days: 90
