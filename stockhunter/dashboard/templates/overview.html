@@ -24,16 +24,16 @@
       <td class="hide-sm sub">{{ r.pos[0] if r.pos else '' }}</td></tr>
     {% else %}<tr><td colspan="5" class="muted">Aucune action en DEVELOPING ou READY : aucun achat justifié selon les règles actuelles.</td></tr>{% endfor %}
     </table></div>
-  <div class="card"><h2>Dernières alertes Telegram</h2>
-    <table>{% for a in fresh.alerts %}<tr><td class="sub">{{ a.at.strftime('%d/%m %H:%M') }}</td><td>{{ a.title }}</td>
+  <div class="card"><h2>Dernières alertes Telegram <span class="sub">(heure de Paris)</span></h2>
+    <table>{% for a in fresh.alerts %}<tr><td class="sub">{{ a.at|t }}</td><td>{{ a.title }}</td>
       <td class="sub">{{ {'SENT':'envoyé','SKIPPED':'non configuré','PENDING':'en attente','FAILED':'échec'}[a.status] }}</td></tr>
     {% else %}<tr><td class="muted">Aucune alerte.</td></tr>{% endfor %}</table></div>
 </div>
 <div class="card" style="margin-top:16px"><h2>Fraîcheur des données</h2>
   <p class="sub">Dernière clôture en base : <b>{{ fresh.last_price|d }}</b>{% if fresh.critical %} · <span class="neg">{{ fresh.critical }} anomalie(s) critique(s)</span>{% endif %}</p>
-  <table><tr><th>Traitement</th><th>Dernière exécution</th><th>Dernier succès</th></tr>
+  <table><tr><th>Traitement</th><th>Dernière exécution (Paris)</th><th>Dernier succès</th></tr>
   {% for name, j in fresh.jobs|dictsort %}<tr><td>{{ name }}</td>
-    <td class="{{ 'neg' if j.last[0]=='failed' }}">{{ j.last[0] }} · {{ j.last[1].strftime('%d/%m %H:%M') }} UTC</td>
-    <td>{{ j.ok.strftime('%d/%m %H:%M') ~ ' UTC' if j.ok else 'jamais' }}</td></tr>{% endfor %}</table></div>
+    <td class="{{ 'neg' if j.last[0]=='failed' }}">{{ j.last[0] }} · {{ j.last[1]|t }}</td>
+    <td>{{ j.ok|t if j.ok else 'jamais' }}</td></tr>{% endfor %}</table></div>
 {% endif %}
 {% endblock %}

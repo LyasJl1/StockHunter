@@ -102,6 +102,6 @@ def test_settings_sources_from_database(engine, client):
                       called_at=datetime(2026, 11, 12, 23, 21, tzinfo=timezone.utc)))
     login(client)
     page = client.get("/settings").text
-    assert "12/11/2026 23:20 UTC" in page          # tiingo : appel réussi
+    assert "13/11/2026 00:20 (Paris)" in page          # tiingo : appel réussi
     assert "23:21" not in page                      # fred : échec non compté comme réussi
     assert "MANQUANT: SH_TIINGO_API_KEY" not in page

@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import json
 import secrets
-from datetime import date
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.parse import quote
 
@@ -50,6 +51,17 @@ def fr_date(d):
     return d.strftime("%d/%m/%Y") if hasattr(d, "strftime") else str(d)
 
 
+PARIS = ZoneInfo("Europe/Paris")
+
+
+def fr_time(t, fmt="%d/%m %H:%M"):
+    """Horodatage affiché à l'heure de Paris (une date sans fuseau est en UTC dans la base)."""
+    if not isinstance(t, datetime):
+        return "N/D"
+    t = t.replace(tzinfo=timezone.utc) if t.tzinfo is None else t
+    return t.astimezone(PARIS).strftime(fmt)
+
+
 def create_app(engine: Engine, settings: Settings, secret: str | None = None, password_hash: str | None = None,
                secure_cookies: bool = True) -> FastAPI:
     secret = secret or (settings.dashboard_secret.get_secret_value() if settings.dashboard_secret else None)
@@ -63,7 +75,7 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
     tpl = Jinja2Templates(directory=str(TEMPLATES))
     # scripts embarqués (versions figées, aucune dépendance à un CDN externe)
     app.mount("/static", StaticFiles(directory=str(TEMPLATES.with_name("static"))), name="static")
-    tpl.env.filters.update(num=fr_num, pct=fr_pct, d=fr_date)
+    tpl.env.filters.update(num=fr_num, pct=fr_pct, d=fr_date, t=fr_time)
 
     def session(request: Request) -> dict | None:
         return sessions.read(request.cookies.get(COOKIE))
@@ -283,6 +295,6 @@ def _sources(engine, settings) -> list[dict]:
             rows.append({"name": name, "last_ok": "envoi direct (non journalisé ici)",
                          "local": "configuré" if local == "configuré" else "MANQUANT sur ce serveur"})
             continue
-        rows.append({"name": name, "last_ok": ts.strftime("%d/%m/%Y %H:%M UTC") if ts else None,
+        rows.append({"name": name, "last_ok": fr_time(ts, "%d/%m/%Y %H:%M") + " (Paris)" if ts else None,
                      "local": "clé présente" if local == "configuré" else "clé absente (normal)"})
     return rows
