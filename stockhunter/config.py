@@ -51,6 +51,8 @@ class Settings(BaseSettings):
 
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: SecretStr | None = None
+    telegram_max_per_run: int = 15          # anti-spam : au-delà, les messages attendent le run suivant
+    report_morning_hour_paris: int = 8      # rapport du matin, heure de Paris (changements d'heure gérés)
 
     limits: ProviderLimits = Field(default_factory=ProviderLimits)
 
@@ -62,6 +64,8 @@ class Settings(BaseSettings):
             "fred": "configuré" if self.fred_api_key else "MANQUANT: SH_FRED_API_KEY",
             "finnhub": "configuré" if self.finnhub_api_key else "optionnel: SH_FINNHUB_API_KEY absent",
             "massive": "configuré" if self.massive_api_key else "MANQUANT: SH_MASSIVE_API_KEY (univers large)",
+            "telegram": "configuré" if self.telegram_bot_token and self.telegram_chat_id
+            else "MANQUANT: SH_TELEGRAM_BOT_TOKEN / SH_TELEGRAM_CHAT_ID",
         }
 
 

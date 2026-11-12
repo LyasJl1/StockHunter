@@ -266,6 +266,49 @@ def cmd_research(settings, engine, args) -> int:
     return 0
 
 
+def cmd_paper(settings, engine, args) -> int:
+    from stockhunter.portfolio import paper
+    if args.action == "run":
+        created = paper.plan_from_scan(engine)
+        counts = paper.process(engine)
+        print(f"Plans créés : {len(created)} ; " + ", ".join(f"{k} {v}" for k, v in counts.items()))
+    sm = paper.summary(engine)
+    wr = "N/D" if sm["win_rate"] is None else f"{sm['win_rate']:.0%}"
+    print(f"Portefeuille SIMULÉ : valeur {sm['equity']:,.0f} $ (capital {sm['capital']:,.0f} $), réalisé "
+          f"{sm['realized']:+,.0f} $, latent {sm['unrealized']:+,.0f} $".replace(",", " "))
+    print(f"Trades : {sm['trades_total']} (plans {sm['planned']}, ouverts {sm['open']}, clos {sm['closed']}, "
+          f"annulés {sm['cancelled']}) ; gagnants {wr}")
+    for p_ in sm["positions"]:
+        print(f"  {p_['symbol']:6} {p_['shares']:g} @ {p_['entry']:.2f} depuis {p_['entry_date']} → {p_['last']} "
+              f"({p_['last_date']}) stop {p_['stop']:.2f} TP1 {p_['tp1']:.2f} TP2 {p_['tp2']:.2f}")
+    return 0
+
+
+def cmd_forward(settings, engine, args) -> int:
+    from stockhunter.market.store import MarketStore
+    from stockhunter.research import forward
+    st = MarketStore(settings.market_dir)
+    try:
+        if args.action == "record":
+            print(f"Test prospectif : {forward.record(engine, st)} titre(s) figé(s) dans les paniers.")
+        print(forward.render(forward.report(engine, st)))
+    except RuntimeError as exc:
+        print(f"IGNORÉ : {exc}")
+        return 2
+    return 0
+
+
+def cmd_notify(settings, engine, args) -> int:
+    from stockhunter.notifications.engine import run_notifications
+    if args.preview:
+        from stockhunter.reports.daily import build_report
+        print(build_report(engine, args.kind)[0])
+        return 0
+    out = run_notifications(engine, settings, args.kind, force=args.force)
+    print("Notifications : " + ", ".join(f"{k} = {v}" for k, v in out.items()))
+    return 1 if out.get("echecs") else 0
+
+
 def add_parsers(sub) -> dict:
     sc = sub.add_parser("scan", help="calcule et enregistre le classement")
     sc.add_argument("--as-of", help="date d'analyse AAAA-MM-JJ (séance clôturée), défaut : dernière séance")
@@ -292,5 +335,13 @@ def add_parsers(sub) -> dict:
     rs.add_argument("--holdout", action="store_true")
     rs.add_argument("--allow-holdout-again", action="store_true")
     rs.add_argument("--out")
+    pp = sub.add_parser("paper", help="portefeuille simulé (paper trading)")
+    pp.add_argument("action", choices=["run", "status"])
+    fw = sub.add_parser("forward", help="test prospectif des facteurs pré-enregistrés")
+    fw.add_argument("action", choices=["record", "report"])
+    nt = sub.add_parser("notify", help="rapport quotidien et alertes Telegram")
+    nt.add_argument("kind", choices=["morning", "evening"])
+    nt.add_argument("--force", action="store_true", help="ignorer l'heure de Paris prévue")
+    nt.add_argument("--preview", action="store_true", help="afficher le rapport sans rien envoyer")
     return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "validate": cmd_validate, "market": cmd_market,
-            "research": cmd_research}
+            "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify}

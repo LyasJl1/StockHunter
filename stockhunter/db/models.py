@@ -374,3 +374,101 @@ class MarketSplit(Base):
     split_to: Mapped[float] = mapped_column(Float)
     adjustment_type: Mapped[str | None] = mapped_column(String(30))
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# =========================================================================== Phase 4 : paper trading, alertes
+class PaperTrade(Base):
+    """Trade simulé. Les champs du PLAN (niveaux, taille, version) sont figés à la création ; seul l'état de
+    suivi évolue, et chaque évolution est tracée dans paper_trade_events. Aucun ordre réel."""
+
+    __tablename__ = "paper_trades"
+    __table_args__ = (UniqueConstraint("scan_run_id", "instrument_id", name="uq_paper_signal"),
+                      Index("ix_paper_status", "status"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"))
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    strategy_version_id: Mapped[int] = mapped_column(ForeignKey("strategy_versions.id"))
+    strategies: Mapped[str] = mapped_column(String(40))          # familles actives au signal, ex. "B,D"
+    signal_date: Mapped[date] = mapped_column(Date)
+    signal_close: Mapped[float] = mapped_column(Float)
+    atr_at_signal: Mapped[float] = mapped_column(Float)          # en $
+    entry_max: Mapped[float] = mapped_column(Float)              # pas d'achat au-dessus (anti-gap)
+    entry_min: Mapped[float] = mapped_column(Float)              # sous ce prix, le signal est invalidé
+    stop_initial_offset: Mapped[float] = mapped_column(Float)    # distance du stop en $ (2×ATR)
+    risk_fraction: Mapped[float] = mapped_column(Float)          # part du capital risquée
+    plan_json: Mapped[str] = mapped_column(Text)                 # règles complètes, lisibles
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # --- suivi
+    status: Mapped[str] = mapped_column(String(12), default="PLANNED")  # PLANNED|OPEN|CLOSED|CANCELLED
+    entry_date: Mapped[date | None] = mapped_column(Date)
+    entry_price: Mapped[float | None] = mapped_column(Float)
+    shares: Mapped[float | None] = mapped_column(Float)
+    stop: Mapped[float | None] = mapped_column(Float)
+    tp1: Mapped[float | None] = mapped_column(Float)
+    tp2: Mapped[float | None] = mapped_column(Float)
+    tp1_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    highest_close: Mapped[float | None] = mapped_column(Float)
+    last_processed: Mapped[date | None] = mapped_column(Date)
+    exit_date: Mapped[date | None] = mapped_column(Date)
+    realized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    costs: Mapped[float] = mapped_column(Float, default=0.0)
+    close_reason: Mapped[str | None] = mapped_column(String(80))
+
+
+class PaperTradeEvent(Base):
+    __tablename__ = "paper_trade_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trade_id: Mapped[int] = mapped_column(ForeignKey("paper_trades.id", ondelete="CASCADE"), index=True)
+    event_date: Mapped[date] = mapped_column(Date)
+    kind: Mapped[str] = mapped_column(String(20))   # PLANNED|OPENED|CANCELLED|TP1|STOP_MOVED|CLOSED
+    price: Mapped[float | None] = mapped_column(Float)
+    shares: Mapped[float | None] = mapped_column(Float)
+    detail: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class NotificationLog(Base):
+    """Chaque message a une clé de déduplication : un même événement n'est jamais envoyé deux fois."""
+
+    __tablename__ = "notifications"
+    __table_args__ = (UniqueConstraint("dedup_key", name="uq_notification"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dedup_key: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(30))       # report_morning|report_evening|trade|alert|command|system
+    text: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(12), default="PENDING")  # PENDING|SENT|FAILED|SKIPPED
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ForwardSignal(Base):
+    """Test prospectif : panier du décile favorable de chaque facteur pré-enregistré, enregistré à la date
+    du signal (jamais recalculé). Les résultats sont mesurés plus tard sur les données de marché."""
+
+    __tablename__ = "forward_signals"
+    __table_args__ = (UniqueConstraint("study", "factor", "signal_date", "ticker", name="uq_forward"),
+                      Index("ix_forward_date", "study", "signal_date"))
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    study: Mapped[str] = mapped_column(String(60))
+    factor: Mapped[str] = mapped_column(String(10))
+    signal_date: Mapped[date] = mapped_column(Date)
+    ticker: Mapped[str] = mapped_column(String(20))
+    value: Mapped[float] = mapped_column(Float)
+    universe_size: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class KeyValue(Base):
+    """Petits états techniques persistants (ex. dernier update_id Telegram lu)."""
+
+    __tablename__ = "kv_store"
+
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

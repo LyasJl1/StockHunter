@@ -35,6 +35,8 @@ jobs:
       SH_FRED_API_KEY: ${{ secrets.SH_FRED_API_KEY }}
       SH_FINNHUB_API_KEY: ${{ secrets.SH_FINNHUB_API_KEY }}
       SH_MASSIVE_API_KEY: ${{ secrets.SH_MASSIVE_API_KEY }}
+      SH_TELEGRAM_BOT_TOKEN: ${{ secrets.SH_TELEGRAM_BOT_TOKEN }}
+      SH_TELEGRAM_CHAT_ID: ${{ secrets.SH_TELEGRAM_CHAT_ID }}
       SH_MARKET_DIR: var/market
     steps:
       - uses: actions/checkout@v5
@@ -68,6 +70,15 @@ jobs:
       - name: Scanner (classement multicritère)
         # Ne score que si toutes les séries de prix sont à jour (sinon le 2e passage du soir s'en charge)
         run: stockhunter scan --if-new --require-fresh || echo "::warning::scan non exécuté (voir le log)"
+
+      - name: Paper trading (plans des signaux READY, suivi des positions)
+        run: stockhunter paper run || echo "::warning::paper trading en erreur"
+
+      - name: Test prospectif (paniers hebdomadaires des facteurs pré-enregistrés)
+        run: stockhunter forward record || echo "::warning::test prospectif non mis à jour"
+
+      - name: Rapport et alertes Telegram
+        run: stockhunter notify evening || echo "::warning::notifications en erreur"
 
       - name: Rapport
         if: always()

@@ -93,3 +93,27 @@ def test_no_effect_market_is_not_retained(engine, tmp_path, monkeypatch):
     res = broad.run_study(engine, st)
     retained = [k for k, v in res.verdicts.items() if v["decision"].startswith("PROMETTEUR")]
     assert len(retained) <= 1   # sans effet planté, au plus un faux positif toléré au seuil corrigé
+
+
+def test_forward_signals_frozen_weekly_and_measured_later(engine, market, monkeypatch):
+    from sqlalchemy import func as f, select as sel
+
+    from stockhunter.db.models import ForwardSignal
+    from stockhunter.research import forward
+    st, long, days = market
+    monkeypatch.setattr(forward, "START", days[0].date())
+    d1, d2, d3 = days[250].date(), days[252].date(), days[256].date()
+    assert forward.record(engine, st, d1) > 0
+    assert forward.record(engine, st, d2) == 0           # moins de 5 séances depuis le dernier panier
+    n = forward.record(engine, st, d3)
+    assert n > 0
+    with session_scope(engine) as s:
+        assert s.scalar(sel(f.count(f.distinct(ForwardSignal.signal_date)))) == 2
+        per_factor = s.scalar(sel(f.count()).select_from(ForwardSignal).where(
+            ForwardSignal.factor == "H1", ForwardSignal.signal_date == d1))
+    assert 25 <= per_factor <= 31                          # décile de ~290 titres
+    rep = forward.report(engine, st)
+    assert rep["dates"] == 2 and rep["facteurs"]["H1"][20]["dates_mesurees"] == 2
+    assert "Test prospectif" in forward.render(rep)
+    monkeypatch.setattr(forward, "START", date(2030, 1, 1))
+    assert forward.record(engine, st) == 0                 # rien avant la date de début

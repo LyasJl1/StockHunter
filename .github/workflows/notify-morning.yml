@@ -1,0 +1,54 @@
+name: Rapport du matin
+
+# 8 h à Paris en semaine. GitHub planifie en UTC : on lance à 6 h ET 7 h UTC et le programme n'agit qu'à
+# l'heure de Paris voulue (8 h en heure d'été = 6 h UTC, 8 h en heure d'hiver = 7 h UTC).
+on:
+  schedule:
+    - cron: "0 6,7 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Envoyer maintenant, quelle que soit l'heure"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ingestion
+  cancel-in-progress: false
+
+jobs:
+  morning:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 15
+    env:
+      SH_DATABASE_URL: sqlite:///var/stockhunter.db
+      SH_MARKET_DIR: var/market
+      SH_TELEGRAM_BOT_TOKEN: ${{ secrets.SH_TELEGRAM_BOT_TOKEN }}
+      SH_TELEGRAM_CHAT_ID: ${{ secrets.SH_TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+
+      - name: Restaurer la base
+        uses: actions/cache/restore@v5
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+          restore-keys: stockhunter-db-
+
+      - name: Migrations
+        run: stockhunter init-db
+
+      - name: Rapport et commandes Telegram
+        run: stockhunter notify morning ${{ inputs.force && '--force' || '' }}
+
+      - name: Sauvegarder la base (journal des messages)
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}

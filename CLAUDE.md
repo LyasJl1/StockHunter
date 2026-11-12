@@ -39,7 +39,10 @@ Méthode détaillée : `docs/scoring.md`. Protocole de backtest et résultats : 
   validation/          rejeu du moteur réel, trades, portefeuille, verdicts, rapport
   market/              univers large : Massive -> Parquet par séance (brut), référentiel avec radiés, splits
   research/            études pré-enregistrées (protocole écrit avant les données, voir docs/research/)
-Phases suivantes (à créer) : `risk/ portfolio/ notifications/ reports/ dashboard/`.
+  portfolio/paper.py   Trade Decision Engine simulé : plan (R = 2×ATR, TP1 1,5 R, TP2 3 R), suivi, événements
+  reports/daily.py     rapport quotidien (12 sections), uniquement à partir de la base, sans LLM
+  notifications/       Telegram : file persistante, déduplication, retries, anti-spam, commandes
+Phases suivantes (à créer) : `dashboard/` (phase 5), actualités (6), déploiement (7). Ancien plan : `risk/ portfolio/ notifications/ reports/ dashboard/`.
 Cycle d'une stratégie : RESEARCH → BACKTEST → OUT-OF-SAMPLE → PAPER → PROMOTED.
 
 ## Commandes
@@ -58,6 +61,9 @@ stockhunter explain NVDA
 stockhunter validate --out rapport.md --signals-cache var/signals-cache.pkl   # backtest (3 min)
 stockhunter market sync|status      # univers large : toutes les actions US (Massive, gratuit, 2 ans)
 stockhunter research broad [--out f.md]   # étude pré-enregistrée (docs/research/)
+stockhunter paper run|status        # paper trading : plans des signaux READY, suivi, clôtures (simulation)
+stockhunter forward record|report   # test prospectif des facteurs pré-enregistrés (depuis le 13/11/2026)
+stockhunter notify evening|morning [--preview] [--force]   # rapport quotidien + alertes Telegram
 pytest -m "not live"                # tests hors réseau
 pytest -m live                      # tests réels (clés requises)
 ```
