@@ -34,6 +34,7 @@ from stockhunter.db.models import (
     Score,
 )
 from stockhunter.db.session import session_scope
+from stockhunter.trading.rules import Bar, Position, Rules, risk_size, step
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,14 @@ class PaperConfig:
     tp2_r: float = 3.0
     max_sessions: int = 40
     cost_bps: float = 10.0
+    slippage_bps: float = 5.0             # glissement défavorable sur ordres au marché et stops
+    max_correlation: float = 0.80         # refus si corrélation 60 j avec une position ouverte au-delà
+
+    def rules(self) -> Rules:
+        return Rules(stop_atr=self.stop_atr, trail_atr=self.trail_atr, entry_gap_max=self.entry_gap_max,
+                     invalidation_atr=self.invalidation_atr, tp1_r=self.tp1_r, tp1_fraction=self.tp1_fraction,
+                     tp2_r=self.tp2_r, max_sessions=self.max_sessions, cost_bps=self.cost_bps,
+                     slippage_bps=self.slippage_bps)
 
 
 DEFAULT_PAPER = PaperConfig()
@@ -122,19 +131,68 @@ def _bars_after(s, instrument_id: int, after: date) -> list:
                           .order_by(PriceBar.bar_date)))
 
 
-def _sell(s, t: PaperTrade, d: date, price: float, shares: float, cfg: PaperConfig, kind: str, why: str):
-    cost = price * shares * cfg.cost_bps / 1e4
-    t.realized_pnl += (price - t.entry_price) * shares
-    t.costs += cost
-    t.shares -= shares
-    _event(s, t, d, kind, price, shares, why)
-    if t.shares <= 1e-9:
-        t.status, t.exit_date, t.close_reason = "CLOSED", d, why
+def to_position(t: PaperTrade) -> Position:
+    return Position(signal_close=t.signal_close, atr=t.atr_at_signal, entry_min=t.entry_min, entry_max=t.entry_max,
+                    stop_offset=t.stop_initial_offset, status=t.status, entry_date=t.entry_date,
+                    entry_price=t.entry_price, shares=t.shares or 0.0, stop=t.stop, tp1=t.tp1, tp2=t.tp2,
+                    tp1_done=bool(t.tp1_done), highest_close=t.highest_close, sessions_held=t.sessions_held or 0,
+                    realized=t.realized_pnl or 0.0, costs=t.costs or 0.0, initial_risk=t.initial_risk,
+                    exit_date=t.exit_date, close_reason=t.close_reason)
+
+
+def _write_back(t: PaperTrade, p: Position) -> None:
+    t.signal_close, t.atr_at_signal, t.entry_min, t.entry_max = p.signal_close, p.atr, p.entry_min, p.entry_max
+    t.stop_initial_offset, t.status, t.entry_date, t.entry_price = p.stop_offset, p.status, p.entry_date, p.entry_price
+    t.shares, t.stop, t.tp1, t.tp2, t.tp1_done = p.shares, p.stop, p.tp1, p.tp2, p.tp1_done
+    t.highest_close, t.sessions_held, t.realized_pnl, t.costs = p.highest_close, p.sessions_held, p.realized, p.costs
+    t.initial_risk, t.exit_date, t.close_reason = p.initial_risk, p.exit_date, (p.close_reason or "")[:200] or None
+
+
+def _correlation(s, a: int, b: int, until: date, window: int = 60) -> float | None:
+    """Corrélation des rendements journaliers (clôtures ajustées) sur les `window` dernières séances communes."""
+    def rets(iid):
+        rows = s.execute(select(PriceBar.bar_date, func.coalesce(PriceBar.adj_close, PriceBar.close))
+                         .where(PriceBar.instrument_id == iid, PriceBar.bar_date < until)
+                         .order_by(PriceBar.bar_date.desc()).limit(window + 1)).all()
+        return {d: c for d, c in rows}
+    ra, rb = rets(a), rets(b)
+    days = sorted(set(ra) & set(rb))
+    if len(days) < 30:
+        return None
+    xa = [ra[d1] / ra[d0] - 1 for d0, d1 in zip(days, days[1:])]
+    xb = [rb[d1] / rb[d0] - 1 for d0, d1 in zip(days, days[1:])]
+    n = len(xa)
+    ma, mb = sum(xa) / n, sum(xb) / n
+    va, vb = sum((x - ma) ** 2 for x in xa), sum((x - mb) ** 2 for x in xb)
+    if va <= 0 or vb <= 0:
+        return None
+    return sum((x - ma) * (y - mb) for x, y in zip(xa, xb)) / math.sqrt(va * vb)
+
+
+def _sizer(s, t: PaperTrade, inst: Instrument, d: date, cfg: PaperConfig):
+    """Contraintes de portefeuille évaluées au moment de l'entrée ; chaque refus est motivé (journal de décision)."""
+    def size(fill: float, stop_offset: float):
+        st = portfolio_state(s, cfg)
+        if len(st["open"]) >= cfg.max_positions:
+            return 0, f"limite de {cfg.max_positions} positions atteinte"
+        others = [(x, s.get(Instrument, x.instrument_id)) for x in st["open"]]
+        if inst.sector_etf and sum(1 for _x, i in others if i.sector_etf == inst.sector_etf) >= cfg.max_per_sector:
+            return 0, f"limite de {cfg.max_per_sector} positions dans le secteur {inst.sector_etf}"
+        for x, i in others:
+            c = _correlation(s, t.instrument_id, x.instrument_id, d)
+            if c is not None and c > cfg.max_correlation:
+                return 0, (f"trop corrélée à la position {i.symbol} (corrélation 60 j {c:.2f} > "
+                           f"{cfg.max_correlation:.2f})")
+        room = st["equity_basis"] * cfg.max_exposure - st["invested"]
+        return risk_size(st["equity_basis"], t.risk_fraction, room)(fill, stop_offset)
+    return size
 
 
 def process(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER) -> dict[str, int]:
-    """Applique les séances nouvelles à chaque plan et position, dans l'ordre chronologique."""
+    """Applique les séances nouvelles à chaque plan et position, dans l'ordre chronologique, avec les règles
+    partagées `stockhunter.trading.rules` (les mêmes que le backtest)."""
     counts = {"ouvertes": 0, "annulees": 0, "fermees": 0, "tp1": 0}
+    rules = cfg.rules()
     with session_scope(engine) as s:
         trades = list(s.scalars(select(PaperTrade).where(PaperTrade.status.in_(("PLANNED", "OPEN")))
                                 .order_by(PaperTrade.signal_date, PaperTrade.id)))
@@ -143,84 +201,19 @@ def process(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER) -> dict[str, int]:
             for b in _bars_after(s, t.instrument_id, t.last_processed or t.signal_date):
                 if t.status not in ("PLANNED", "OPEN"):
                     break
-                d = b.bar_date
-                f = b.split_factor or 1.0
-                if f != 1.0 and t.status == "OPEN":   # split pendant le trade
-                    t.shares *= f
-                    for attr in ("entry_price", "stop", "tp1", "tp2", "highest_close"):
-                        setattr(t, attr, getattr(t, attr) / f)
-                    _event(s, t, d, "STOP_MOVED", t.stop, t.shares, f"split {f:g}:1 : quantité et niveaux ajustés")
-                if t.status == "PLANNED":
-                    _try_open(s, t, inst, b, cfg, counts)
-                    if t.status != "OPEN":
-                        t.last_processed = d
-                        continue
-                _manage(s, t, b, cfg, counts)
-                t.last_processed = d
+                pos = to_position(t)
+                bar = Bar(b.bar_date, b.open, b.high, b.low, b.close, b.split_factor or 1.0)
+                for ev in step(pos, bar, _sizer(s, t, inst, b.bar_date, cfg), rules):
+                    _event(s, t, ev.date, ev.kind, ev.price, ev.shares, ev.detail)
+                    key = {"OPENED": "ouvertes", "CANCELLED": "annulees", "TP1": "tp1"}.get(ev.kind)
+                    if key:
+                        counts[key] += 1
+                _write_back(t, pos)
+                t.last_processed = b.bar_date
+                if t.status == "CLOSED":
+                    counts["fermees"] += 1
+                s.flush()
     return counts
-
-
-def _try_open(s, t: PaperTrade, inst: Instrument, b, cfg: PaperConfig, counts: dict):
-    d, o = b.bar_date, b.open
-    if o > t.entry_max:
-        t.status, t.close_reason = "CANCELLED", f"gap d'ouverture à {o:.2f} $ au-dessus de la zone (max {t.entry_max:.2f})"
-    elif o < t.entry_min:
-        t.status, t.close_reason = "CANCELLED", f"ouverture à {o:.2f} $ sous le niveau d'invalidation ({t.entry_min:.2f})"
-    else:
-        st = portfolio_state(s, cfg)
-        same_sector = sum(1 for x in st["open"] if s.get(Instrument, x.instrument_id).sector_etf == inst.sector_etf)
-        risk_amount = st["equity_basis"] * t.risk_fraction
-        shares = math.floor(risk_amount / t.stop_initial_offset)
-        room = st["equity_basis"] * cfg.max_exposure - st["invested"]
-        shares = min(shares, math.floor(max(room, 0) / o))
-        if len(st["open"]) >= cfg.max_positions:
-            t.status, t.close_reason = "CANCELLED", f"limite de {cfg.max_positions} positions atteinte"
-        elif inst.sector_etf and same_sector >= cfg.max_per_sector:
-            t.status, t.close_reason = "CANCELLED", f"limite de {cfg.max_per_sector} positions dans le secteur {inst.sector_etf}"
-        elif shares < 1:
-            t.status, t.close_reason = "CANCELLED", "exposition maximale atteinte (pas de levier)"
-        else:
-            r = t.stop_initial_offset
-            t.status, t.entry_date, t.entry_price, t.shares = "OPEN", d, o, float(shares)
-            t.stop, t.tp1, t.tp2, t.highest_close = o - r, o + cfg.tp1_r * r, o + cfg.tp2_r * r, o
-            t.costs += o * shares * cfg.cost_bps / 1e4
-            _event(s, t, d, "OPENED", o, float(shares),
-                   f"Achat simulé de {shares} actions à {o:.2f} $ (risque {shares * r:.0f} $ = "
-                   f"{shares * r / st['equity_basis']:.2%} du capital) ; stop {t.stop:.2f}, TP1 {t.tp1:.2f}, TP2 {t.tp2:.2f}")
-            counts["ouvertes"] += 1
-            return
-    _event(s, t, d, "CANCELLED", o, None, t.close_reason)
-    counts["annulees"] += 1
-
-
-def _manage(s, t: PaperTrade, b, cfg: PaperConfig, counts: dict):
-    d = b.bar_date
-    held = s.scalar(select(func.count()).select_from(PriceBar).where(
-        PriceBar.instrument_id == t.instrument_id, PriceBar.bar_date >= t.entry_date, PriceBar.bar_date <= d))
-    if d > t.entry_date and b.open <= t.stop:
-        _sell(s, t, d, b.open, t.shares, cfg, "CLOSED", f"stop : ouverture en gap à {b.open:.2f} $ sous le stop {t.stop:.2f}")
-    elif b.low <= t.stop:
-        why = "stop au prix d'entrée après TP1" if t.tp1_done and abs(t.stop - t.entry_price) < 1e-9 else "stop"
-        _sell(s, t, d, t.stop, t.shares, cfg, "CLOSED", f"{why} touché à {t.stop:.2f} $")
-    else:
-        if not t.tp1_done and b.high >= t.tp1:
-            qty = math.floor(t.shares * cfg.tp1_fraction) or t.shares
-            _sell(s, t, d, t.tp1, qty, cfg, "TP1", f"TP1 atteint : vente de {qty:g} actions à {t.tp1:.2f} $ ; stop remonté à l'entrée")
-            t.tp1_done = True
-            t.stop = max(t.stop, t.entry_price)
-            counts["tp1"] += 1
-        if t.status == "OPEN" and b.high >= t.tp2:
-            _sell(s, t, d, t.tp2, t.shares, cfg, "CLOSED", f"TP2 atteint à {t.tp2:.2f} $")
-    if t.status == "OPEN":
-        t.highest_close = max(t.highest_close or b.close, b.close)
-        trail = t.highest_close - cfg.trail_atr * t.atr_at_signal
-        if trail > t.stop + 1e-9:
-            t.stop = trail
-            _event(s, t, d, "STOP_MOVED", trail, t.shares, f"stop suiveur relevé à {trail:.2f} $")
-        if held >= cfg.max_sessions:
-            _sell(s, t, d, b.close, t.shares, cfg, "CLOSED", f"durée maximale de {cfg.max_sessions} séances : vente à la clôture")
-    if t.status == "CLOSED":
-        counts["fermees"] += 1
 
 
 def summary(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER) -> dict[str, Any]:
@@ -242,8 +235,7 @@ def summary(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER) -> dict[str, Any]:
                               "last": last.close if last else None, "last_date": str(last.bar_date) if last else None,
                               "unrealized": u})
         realized = sum(t.realized_pnl - t.costs for t in trades if t.status in ("CLOSED", "OPEN"))
-        r_mult = [(t.realized_pnl - t.costs) / (t.stop_initial_offset * _initial_shares(s, t)) for t in closed
-                  if _initial_shares(s, t)]
+        r_mult = [(t.realized_pnl - t.costs) / t.initial_risk for t in closed if t.initial_risk]
         return {"capital": cfg.capital, "equity": cfg.capital + realized + mtm, "realized": realized, "unrealized": mtm,
                 "trades_total": len(trades), "planned": sum(t.status == "PLANNED" for t in trades), "open": len(open_),
                 "closed": len(closed), "cancelled": sum(t.status == "CANCELLED" for t in trades),
@@ -290,13 +282,14 @@ def equity_curve(engine: Engine, cfg: PaperConfig | None = None) -> list[dict[st
     for d in days:
         realized, mtm = 0.0, 0.0
         for t in trades:
-            evs = [e for e in events if e.trade_id == t.id and e.event_date <= d]
-            held, entry, cost = 0.0, t.entry_price, 0.0
-            for ev in evs:
+            held, entry, cost = 0.0, None, 0.0
+            for ev in (e for e in events if e.trade_id == t.id and e.event_date <= d):
                 if ev.kind == "OPENED":
-                    held = ev.shares
+                    held, entry = ev.shares, ev.price
                     cost += ev.price * ev.shares * cfg.cost_bps / 1e4
-                elif ev.kind in ("TP1", "CLOSED") and ev.shares:
+                elif ev.kind == "SPLIT" and entry is not None and ev.price:
+                    held, entry = held * ev.price, entry / ev.price      # ev.price = facteur du split
+                elif ev.kind in ("TP1", "CLOSED") and ev.shares and entry is not None:
                     realized += (ev.price - entry) * ev.shares
                     cost += ev.price * ev.shares * cfg.cost_bps / 1e4
                     held -= ev.shares

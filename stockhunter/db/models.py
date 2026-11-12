@@ -440,7 +440,9 @@ class PaperTrade(Base):
     exit_date: Mapped[date | None] = mapped_column(Date)
     realized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
     costs: Mapped[float] = mapped_column(Float, default=0.0)
-    close_reason: Mapped[str | None] = mapped_column(String(80))
+    close_reason: Mapped[str | None] = mapped_column(String(200))
+    sessions_held: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    initial_risk: Mapped[float | None] = mapped_column(Float)    # risque en $ à l'entrée (quantité × R)
 
 
 class PaperTradeEvent(Base):
