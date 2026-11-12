@@ -94,3 +94,28 @@ def test_commands_only_from_configured_chat(engine, settings):
     ne.flush(engine, client())
     assert "Portefeuille simulé" in json.loads(sent.calls[0].request.content)["text"]
     assert ne.process_commands(engine, client()) == 0   # même update relu : dédupliqué (offset + clé)
+
+
+def test_repaired_failure_does_not_alert_but_open_failure_does(engine):
+    from stockhunter.db.models import JobRun
+    now = datetime(2026, 11, 12, 15, 0, tzinfo=timezone.utc)
+    with session_scope(engine) as s:   # cas réel du 12/11 : deux échecs puis un succès
+        s.add_all([JobRun(job_name="market_sync", status="failed", started_at=datetime(2026, 11, 12, 12, 15)),
+                   JobRun(job_name="market_sync", status="failed", started_at=datetime(2026, 11, 12, 12, 21)),
+                   JobRun(job_name="market_sync", status="partial", started_at=datetime(2026, 11, 12, 13, 40)),
+                   JobRun(job_name="ingest_prices", status="failed", started_at=datetime(2026, 11, 12, 14, 0),
+                          detail="panne")])
+    assert ne.enqueue_system_alerts(engine, now) == 1
+    with session_scope(engine) as s:
+        assert "ingest_prices" in s.scalar(select(NotificationLog.text))
+
+
+def test_report_tells_the_truth_about_plans_and_validation(engine):
+    from stockhunter.db.models import StrategyVersion
+    from stockhunter.reports.daily import build_report
+    setup(engine)
+    with session_scope(engine) as s:   # version réellement consultée dans le registre versionné
+        sv = s.scalar(select(StrategyVersion))
+        sv.name, sv.version = "stockhunter-multifactor", "2.0.0"
+    text, _ = build_report(engine, "morning")
+    assert "pas encore créés" in text and "AUCUNE STRATÉGIE VALIDÉE" in text and "non testées" not in text

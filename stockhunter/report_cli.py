@@ -22,6 +22,18 @@ def validation_line(s, strategy_version_id: int) -> str:
     vr = s.scalars(select(ValidationRun).where(ValidationRun.strategy_version_id == strategy_version_id)
                    .order_by(ValidationRun.holdout_evaluated.desc(), ValidationRun.id.desc()).limit(1)).first()
     if vr is None:
+        # La validation a pu être faite dans un autre environnement : le registre versionné fait foi.
+        from stockhunter.db.models import StrategyVersion as _SV
+        from stockhunter.validation.run import LEDGER
+        sv = s.get(_SV, strategy_version_id)
+        entries = []
+        if sv is not None and LEDGER.exists():
+            entries = [c for c in json.loads(LEDGER.read_text(encoding="utf-8")).get("consultations", [])
+                       if c.get("name") == sv.name and c.get("version") == sv.version]
+        if entries:
+            c = entries[-1]
+            return (f"Validation historique ({c['date']}, période réservée incluse) : {c['verdict'].upper()} — "
+                    f"le classement est informatif, pas un signal fiable (rapport : {c['rapport']}).")
         return "Validation historique : aucune (stratégies non testées)."
     v = json.loads(vr.verdicts_json)
     ok = [k for k, x in v.items() if x["decision"].startswith("ÉLIGIBLE")]

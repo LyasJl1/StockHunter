@@ -15,7 +15,6 @@ from stockhunter.db.models import (
     DataAnomaly,
     Filing,
     Instrument,
-    JobRun,
     MacroObservation,
     MacroSeries,
     MarketEvent,
@@ -87,10 +86,12 @@ def build_report(engine: Engine, kind: str = "evening", now: datetime | None = N
                            .where(PaperTradeEvent.event_date >= as_of - timedelta(days=3),
                                   PaperTradeEvent.kind.in_(("OPENED", "TP1", "CLOSED", "CANCELLED", "PLANNED")))
                            .order_by(PaperTradeEvent.id)).all()
+        planned_syms = list(s.scalars(select(Instrument.symbol).join(PaperTrade, PaperTrade.instrument_id == Instrument.id)
+                                      .where(PaperTrade.scan_run_id == run.id)))
         crit = s.scalar(select(func.count()).select_from(DataAnomaly).where(
             DataAnomaly.resolved_at.is_(None), DataAnomaly.severity == "critical")) or 0
-        failed = s.execute(select(JobRun.job_name, JobRun.started_at).where(
-            JobRun.status == "failed", JobRun.started_at >= now - timedelta(days=1))).all()
+        from stockhunter.notifications.engine import unresolved_failures
+        failed = [(j.job_name, j.started_at) for j in unresolved_failures(s, now)]
 
     pf = paper.summary(engine)
     scores = {sym: (sc, name) for sc, sym, name in rows}
@@ -139,9 +140,14 @@ def build_report(engine: Engine, kind: str = "evening", now: datetime | None = N
     if changes:
         L += ["", "<b>6. Changements depuis le dernier scan</b>"]
         L += [f"• {e(sym)} : {ch.from_status} → {ch.to_status}" for ch, sym in sorted(changes, key=lambda x: x[1])[:10]]
-    L += ["", "<b>7. Signaux (simulation)</b>",
-          (f"READY : {', '.join(ready)} → plans de paper trading créés (entrée conditionnelle demain à l'ouverture)."
-           if ready else "Aucun signal READY.")]
+    if not ready:
+        sig = "Aucun signal READY."
+    elif planned_syms:
+        sig = (f"READY : {', '.join(ready)}. Plans de paper trading enregistrés : {', '.join(sorted(planned_syms))} "
+               "(entrée conditionnelle à l'ouverture de la séance suivante).")
+    else:
+        sig = f"READY : {', '.join(ready)}. Plans de paper trading pas encore créés (création après l'ingestion du soir)."
+    L += ["", "<b>7. Signaux (simulation)</b>", sig]
     # 8-9. Portefeuille papier
     L += ["", "<b>8. Portefeuille simulé</b>",
           f"Valeur {amount(pf['equity'])} $ (capital {amount(pf['capital'])} $) · réalisé {money(pf['realized'])} $ · "

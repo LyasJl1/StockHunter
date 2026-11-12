@@ -10,7 +10,7 @@ from __future__ import annotations
 import html
 import json
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -98,12 +98,26 @@ def enqueue_trade_events(engine: Engine) -> int:
     return n
 
 
-def enqueue_system_alerts(engine: Engine) -> int:
-    """Alerte en cas de job en échec complet (panne critique)."""
+def unresolved_failures(s, now: datetime, hours: int = 24) -> list[JobRun]:
+    """Échecs des dernières heures qui n'ont PAS été suivis d'une exécution réussie du même job :
+    une panne déjà réparée ne déclenche pas d'alerte."""
+    since = now - timedelta(hours=hours)
+    out = []
+    for j in s.scalars(select(JobRun).where(JobRun.status == "failed", JobRun.started_at >= since)
+                       .order_by(JobRun.id.desc())):
+        later_ok = s.scalar(select(JobRun.id).where(JobRun.job_name == j.job_name, JobRun.id > j.id,
+                                                    JobRun.status.in_(("success", "partial"))).limit(1))
+        if not later_ok and all(x.job_name != j.job_name for x in out):
+            out.append(j)
+    return out
+
+
+def enqueue_system_alerts(engine: Engine, now: datetime | None = None) -> int:
+    """Alerte en cas de job en échec complet non résolu (panne critique)."""
     n = 0
+    now = now or datetime.now(timezone.utc)
     with session_scope(engine) as s:
-        failed = list(s.execute(select(JobRun.id, JobRun.job_name, JobRun.detail).where(JobRun.status == "failed")
-                                .order_by(JobRun.id.desc()).limit(10)))
+        failed = [(j.id, j.job_name, j.detail) for j in unresolved_failures(s, now)]
     for jid, name, detail in failed:
         n += enqueue(engine, "system", f"job-failed:{jid}",
                      f"<b>STOCKHUNTER AI — ALERTE SYSTÈME</b>\nJob <b>{e(name)}</b> en échec.\n<pre>{e((detail or '')[:800])}</pre>")
@@ -240,7 +254,7 @@ def run_notifications(engine: Engine, settings: Settings, kind: str, now: dateti
         key = f"report:{kind}:{as_of if kind == 'evening' else paris.date()}"
         out["rapport"] = "mis en file" if enqueue(engine, f"report_{kind}", key, text) else "déjà envoyé (dédupliqué)"
     out["alertes_trading"] = enqueue_trade_events(engine)
-    out["alertes_systeme"] = enqueue_system_alerts(engine)
+    out["alertes_systeme"] = enqueue_system_alerts(engine, now)
     out["commandes"] = process_commands(engine, client)
     out.update(flush(engine, client, settings.telegram_max_per_run))
     return out
