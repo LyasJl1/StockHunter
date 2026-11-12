@@ -29,6 +29,9 @@ from stockhunter.db.session import session_scope
 log = logging.getLogger(__name__)
 
 
+SHORT_WINDOW = timedelta(minutes=5)
+
+
 class ProviderError(RuntimeError):
     def __init__(self, provider: str, message: str, status_code: int | None = None):
         super().__init__(f"[{provider}] {message}")
@@ -114,11 +117,29 @@ class ProviderClient:
     def remaining_quota(self) -> dict[str, int]:
         return {str(q.span): q.max_calls - self.calls_in_window(q.span) for q in self.quotas}
 
+    def _oldest_in_window(self, span: timedelta) -> datetime | None:
+        since = datetime.now(timezone.utc) - span
+        with session_scope(self.engine) as s:
+            return s.scalar(select(func.min(ApiCall.called_at)).where(
+                ApiCall.provider == self.name, ApiCall.from_cache.is_(False), ApiCall.called_at >= since))
+
     def _check_quota(self):
+        """Fenêtre courte (≤ 5 min, ex. 5 appels/minute) : on ATTEND qu'une place se libère.
+        Fenêtre longue (heure, jour) : on lève QuotaExceeded pour que le job s'arrête proprement."""
         for q in self.quotas:
-            used = self.calls_in_window(q.span)
-            if used >= q.max_calls:
-                raise QuotaExceeded(self.name, f"quota atteint : {used}/{q.max_calls} sur {q.span}")
+            for _attempt in range(4):
+                used = self.calls_in_window(q.span)
+                if used < q.max_calls:
+                    break
+                if q.span > SHORT_WINDOW:
+                    raise QuotaExceeded(self.name, f"quota atteint : {used}/{q.max_calls} sur {q.span}")
+                oldest = self._oldest_in_window(q.span)
+                if oldest is not None and oldest.tzinfo is None:
+                    oldest = oldest.replace(tzinfo=timezone.utc)
+                wait = ((oldest + q.span) - datetime.now(timezone.utc)).total_seconds() + 0.5 if oldest else 1.0
+                self.sleep(max(0.5, min(wait, q.span.total_seconds() + 1)))
+            else:
+                raise QuotaExceeded(self.name, f"quota toujours atteint après attente : {used}/{q.max_calls} sur {q.span}")
 
     def _throttle(self):
         if self.min_interval_s:

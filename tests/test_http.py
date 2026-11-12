@@ -73,3 +73,28 @@ def test_gives_up_after_max_retries(engine, tmp_path):
     with pytest.raises(ProviderError):
         make_client(engine, tmp_path, sleeps, max_retries=2).get_json("/x")
     assert len(sleeps) == 2
+
+
+@respx.mock
+def test_short_window_waits_instead_of_failing(engine, tmp_path):
+    """Cas réel du 12/11/2026 (Massive, 5 appels/min) : le 6e appel doit attendre, pas échouer."""
+    respx.get("https://api.test/x").mock(return_value=httpx.Response(200, json={}))
+    sleeps = []
+    c = make_client(engine, tmp_path, sleeps, quotas=[QuotaWindow(timedelta(minutes=1), 2)])
+    c.get_json("/x")
+    c.get_json("/x")
+    with pytest.raises(QuotaExceeded, match="après attente"):
+        c.get_json("/x")   # l'horloge ne bouge pas dans ce test : la place ne se libère jamais
+    assert len(sleeps) == 4 and 55 < sleeps[0] <= 61   # attend ~60 s que le plus ancien appel sorte
+
+
+@respx.mock
+def test_short_window_really_proceeds_once_slot_frees(engine, tmp_path):
+    import time
+    respx.get("https://api.test/x").mock(return_value=httpx.Response(200, json={}))
+    c = ProviderClient(name="t2", base_url="https://api.test", engine=engine, cache_dir=tmp_path / "c",
+                       quotas=[QuotaWindow(timedelta(seconds=2), 2)])   # vrai sommeil
+    t0 = time.monotonic()
+    for _ in range(3):
+        c.get_json("/x")
+    assert 1.0 < time.monotonic() - t0 < 6
