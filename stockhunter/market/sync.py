@@ -23,9 +23,13 @@ log = logging.getLogger(__name__)
 TICKERS_REFRESH_DAYS = 7
 
 
+PLAN_MAX_AGE_DAYS = 729  # plan gratuit : 2 ans glissants ; au-delà Massive répond 403 NOT_AUTHORIZED
+
+
 def missing_sessions(store: MarketStore, today: date, history_days: int) -> list[date]:
     last = last_completed_session(today)
     wanted = [d.date() for d in trading_days(last - timedelta(days=int(history_days * 1.5)), last)][-history_days:]
+    wanted = [d for d in wanted if (last - d).days <= PLAN_MAX_AGE_DAYS]
     have = set(store.sessions())
     return sorted((d for d in wanted if d not in have), reverse=True)  # les plus récentes d'abord
 

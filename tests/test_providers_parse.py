@@ -61,3 +61,8 @@ def test_nyse_calendar():
     # jeudi 12/11/2026 : la séance du jour n'est jamais considérée comme complète
     assert last_completed_session(date(2026, 11, 12)) == date(2026, 11, 11)
     assert last_completed_session(date(2026, 11, 30)) == date(2026, 11, 27)  # lundi après Thanksgiving
+
+
+def test_exceptional_closure_2025_01_09():
+    days = {d.date() for d in trading_days(date(2025, 1, 6), date(2025, 1, 10))}
+    assert date(2025, 1, 9) not in days and date(2025, 1, 8) in days

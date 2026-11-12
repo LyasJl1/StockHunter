@@ -113,3 +113,8 @@ def test_reference_pagination_and_splits(engine, mv):
 def test_missing_key(settings, engine):
     with pytest.raises(ProviderError, match="SH_MASSIVE_API_KEY"):
         MassiveProvider(settings, engine)
+
+
+def test_sessions_outside_free_plan_window_are_not_requested(tmp_path):
+    m = missing_sessions(MarketStore(tmp_path), date(2026, 11, 12), 504)
+    assert date(2024, 11, 11) not in m and date(2024, 11, 12) in m   # cas réels du 12/11/2026 (403)

@@ -23,6 +23,8 @@ from pandas.tseries.offsets import CustomBusinessDay
 
 class NYSEHolidayCalendar(AbstractHolidayCalendar):
     rules = [
+        # Fermetures exceptionnelles connues
+        Holiday("CarterMourning", year=2025, month=1, day=9),  # deuil national, Jimmy Carter
         Holiday("NewYearsDay", month=1, day=1, observance=nearest_workday),
         USMartinLutherKingJr,
         USPresidentsDay,
