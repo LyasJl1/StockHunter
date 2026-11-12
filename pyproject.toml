@@ -27,7 +27,7 @@ build-backend = "setuptools.build_meta"
 include = ["stockhunter*"]
 
 [tool.setuptools.package-data]
-stockhunter = ["universe/*.csv"]
+stockhunter = ["universe/*.csv", "validation/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

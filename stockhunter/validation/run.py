@@ -30,18 +30,30 @@ def data_fingerprint(store: DataStore) -> str:
     return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
 
-def holdout_count(engine: Engine, cfg: ScoringConfig) -> int:
+LEDGER = Path(__file__).with_name("holdout_ledger.json")
+
+
+def ledger_count(cfg: ScoringConfig, ledger: Path = LEDGER) -> int:
+    if not ledger.exists():
+        return 0
+    data = json.loads(ledger.read_text(encoding="utf-8"))
+    return sum(1 for c in data.get("consultations", []) if c["name"] == cfg.name and c["version"] == cfg.version)
+
+
+def holdout_count(engine: Engine, cfg: ScoringConfig, ledger: Path = LEDGER) -> int:
+    """Consultations connues : celles de cette base ET celles du registre versionné (autres environnements)."""
     with session_scope(engine) as s:
         sv = _strategy_version(s, cfg)
-        return s.scalar(select(func.count()).select_from(ValidationRun).where(
+        in_db = s.scalar(select(func.count()).select_from(ValidationRun).where(
             ValidationRun.strategy_version_id == sv.id, ValidationRun.holdout_evaluated.is_(True))) or 0
+    return max(in_db, ledger_count(cfg, ledger))
 
 
 def run_validation(engine: Engine, include_holdout: bool = False, allow_holdout_again: bool = False,
                    params: BacktestParams = BacktestParams(), cfg: ScoringConfig = DEFAULT_CONFIG,
-                   signals_cache: Path | None = None,
+                   signals_cache: Path | None = None, ledger: Path = LEDGER,
                    progress: Callable[[int, int], None] | None = None) -> tuple[int, ValidationReport, int]:
-    prior = holdout_count(engine, cfg)
+    prior = holdout_count(engine, cfg, ledger)
     if include_holdout and prior and not allow_holdout_again:
         raise ScanError(f"la période réservée a déjà été évaluée {prior} fois pour {cfg.name} {cfg.version} : "
                         "la réévaluer après avoir vu ses résultats la rend moins probante "

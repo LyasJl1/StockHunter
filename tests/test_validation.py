@@ -111,17 +111,18 @@ def test_run_validation_end_to_end_and_holdout_guard(engine, tmp_path):
     seed(engine)
     p = BacktestParams(warmup_sessions=200, every_n_sessions=10, horizons=(5, 20),
                        holdout_start=date(2026, 9, 1), embargo_days=30, min_trades=1)
+    led = tmp_path / "ledger.json"   # registre vide pour ce test
     run_id, rep, prior = run_validation(engine, include_holdout=False, params=p,
-                                        signals_cache=tmp_path / "sig.pkl")
+                                        signals_cache=tmp_path / "sig.pkl", ledger=led)
     assert prior == 0 and rep.period["holdout_evalue"] is False and "holdout" not in rep.event_study
     assert (tmp_path / "sig.pkl").exists()
     md = render_markdown(run_id, rep, __import__("stockhunter.scoring.config", fromlist=["x"]).DEFAULT_CONFIG, prior)
     assert "Biais du survivant" in md and "NON évaluée" in md
-    run_validation(engine, include_holdout=True, params=p, signals_cache=tmp_path / "sig.pkl")
+    run_validation(engine, include_holdout=True, params=p, signals_cache=tmp_path / "sig.pkl", ledger=led)
     with pytest.raises(ScanError, match="déjà été évaluée 1 fois"):
-        run_validation(engine, include_holdout=True, params=p, signals_cache=tmp_path / "sig.pkl")
+        run_validation(engine, include_holdout=True, params=p, signals_cache=tmp_path / "sig.pkl", ledger=led)
     _, rep3, prior3 = run_validation(engine, include_holdout=True, allow_holdout_again=True, params=p,
-                                     signals_cache=tmp_path / "sig.pkl")
+                                     signals_cache=tmp_path / "sig.pkl", ledger=led)
     assert prior3 == 1 and "holdout" in rep3.event_study
 
 
@@ -155,7 +156,19 @@ def test_validation_status_shown_with_ranking(engine):
         assert "aucune (stratégies non testées)" in validation_line(s, sv_id)
     p = BacktestParams(warmup_sessions=200, every_n_sessions=10, horizons=(5, 20),
                        holdout_start=date(2026, 9, 1), embargo_days=30, min_trades=10_000)
-    run_validation(engine, include_holdout=True, params=p)
+    run_validation(engine, include_holdout=True, allow_holdout_again=True, params=p)
     with session_scope(engine) as s:
         line = validation_line(s, sv_id)
     assert "AUCUNE stratégie validée" in line and "y compris période réservée" in line
+
+
+def test_versioned_ledger_blocks_holdout_on_a_fresh_database(engine):
+    """La période réservée de la v2.0.0 a été consultée le 12/11/2026 : refus même sur une base vierge."""
+    from stockhunter.validation.run import ledger_count
+    from stockhunter.scoring.config import DEFAULT_CONFIG
+    if DEFAULT_CONFIG.version != "2.0.0":
+        pytest.skip("registre spécifique à la v2.0.0")
+    assert ledger_count(DEFAULT_CONFIG) == 1
+    seed(engine)
+    with pytest.raises(ScanError, match="déjà été évaluée"):
+        run_validation(engine, include_holdout=True)
