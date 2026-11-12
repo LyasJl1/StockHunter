@@ -146,6 +146,18 @@ def render_markdown(run_id: int, rep: ValidationReport, cfg: ScoringConfig, prio
             d = {r["annee"]: r for r in rows}
             L.append(f"| {name} | " + " | ".join(_pct(d[y]["xs_ew"]) if y in d else "–" for y in years) + " |")
         L.append("")
+    FACTOR_LABELS = {"sub_": "sous-score ", "f_": ""}
+    for label, rows in rep.factors.items():
+        L += [f"## Diagnostic facteur par facteur ({label}) — IC à 20 j", "",
+              "Chaque ingrédient pris isolément. Avec ~25 facteurs testés, 1 ou 2 |t| > 2 peuvent apparaître par hasard.", "",
+              "| Facteur | IC moyen | t | % de dates IC > 0 |", "|---|---:|---:|---:|"]
+        for r in rows:
+            name = r["facteur"]
+            for k, v in FACTOR_LABELS.items():
+                if name.startswith(k):
+                    name = v + name[len(k):]
+            L.append(f"| {name} | {_num(r['ic_moyen'], 3)} | {_num(r['t_stat'])} | {_pct(r['part_ic_positif'], False)} |")
+        L.append("")
     for label, groups in rep.regimes.items():
         L += [f"## Par régime de marché ({label}) — rendement 20 j", "",
               "| Groupe | Régime | Signaux | Rdt moyen | vs univers | % gagnants |", "|---|---|---:|---:|---:|---:|"]

@@ -139,3 +139,23 @@ def test_replay_matches_live_scan(engine):
     with session_scope(engine) as s:
         live = dict(s.execute(select(Instrument.symbol, Score.total).join(Instrument)).all())
     assert dict(zip(sig["symbol"], sig["total"])) == live
+
+
+def test_validation_status_shown_with_ranking(engine):
+    from sqlalchemy import select as sel
+
+    from stockhunter.db.models import ScanRun
+    from stockhunter.db.session import session_scope
+    from stockhunter.report_cli import validation_line
+    from stockhunter.scan import run_scan
+    seed(engine)
+    run_scan(engine)
+    with session_scope(engine) as s:
+        sv_id = s.scalar(sel(ScanRun.strategy_version_id))
+        assert "aucune (stratégies non testées)" in validation_line(s, sv_id)
+    p = BacktestParams(warmup_sessions=200, every_n_sessions=10, horizons=(5, 20),
+                       holdout_start=date(2026, 9, 1), embargo_days=30, min_trades=10_000)
+    run_validation(engine, include_holdout=True, params=p)
+    with session_scope(engine) as s:
+        line = validation_line(s, sv_id)
+    assert "AUCUNE stratégie validée" in line and "y compris période réservée" in line

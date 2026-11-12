@@ -81,10 +81,31 @@ def replay(store: DataStore, cfg: ScoringConfig = DEFAULT_CONFIG, params: Backte
                 **{f"strat_{c}": bool(strat.get(c, {}).get("active")) for c in "ABCD"},
                 "atr_pct": t.get("atr14_pct"), "mom_12_1": t.get("mom_12_1"),
                 "events_covered": bool(cs is not None and as_of >= cs),
+                **{f"sub_{k}": v.get("score") for k, v in r.get("subscores", {}).items()},
+                **{f"f_{k}": _feature(by[sym], k) for k in FEATURES},
             })
         if progress:
             progress(k + 1, len(dates))
     return pd.DataFrame(rows)
+
+
+# Ingrédients bruts du score, enregistrés pour le diagnostic facteur par facteur
+FEATURES = ("rs_spy_3m", "rs_spy_6m", "mom_12_1", "dist_52w_high", "ext_sma50", "atr14_pct", "squeeze_pct",
+            "updown_vol_50", "vol_ratio_20_50", "rs_sector_3m",
+            "revenue_yoy_q", "revenue_accel", "op_margin_delta", "net_income_yoy_q", "roe_ttm",
+            "fcf_yield", "ps_to_growth", "pe_ttm", "earnings_reaction", "earnings_drift")
+
+
+def _feature(inp, key: str) -> float | None:
+    if key == "earnings_reaction":
+        return (inp.earnings or {}).get("reaction_excess")
+    if key == "earnings_drift":
+        return (inp.earnings or {}).get("drift_excess")
+    for src in (inp.tech, inp.fund, inp.val):
+        if key in src:
+            v = src[key]
+            return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    return None
 
 
 def coverage_starts(store: DataStore) -> dict[str, date]:
@@ -225,6 +246,22 @@ def information_coefficient(sig: pd.DataFrame, h: int, every: int = 5) -> dict[s
     return {"horizon": h, "dates": int(len(s)), "ic_moyen": _r(s.mean()),
             "t_stat": _r(newey_west_tstat(s, max(1, math.ceil(h / every)))),
             "part_ic_positif": _r((s > 0).mean())}
+
+
+def factor_diagnostics(sig: pd.DataFrame, h: int, every: int) -> list[dict]:
+    """IC de chaque ingrédient brut du score, pris isolément (diagnostic, pas une optimisation)."""
+    out = []
+    for col in [c for c in sig.columns if c.startswith("f_") or c.startswith("sub_")]:
+        ics = []
+        for _, g in sig.dropna(subset=[col, f"fwd_{h}"]).groupby("date"):
+            if len(g) >= 10:
+                ics.append(g[col].rank().corr(g[f"fwd_{h}"].rank()))
+        s = pd.Series(ics).dropna()
+        if len(s) < 20:
+            continue
+        out.append({"facteur": col, "ic_moyen": _r(s.mean()), "t_stat": _r(newey_west_tstat(s, max(1, math.ceil(h / every)))),
+                    "part_ic_positif": _r((s > 0).mean()), "dates": int(len(s))})
+    return sorted(out, key=lambda r: -(r["t_stat"] or 0))
 
 
 def by_bucket(sig: pd.DataFrame, mask: pd.Series, key: str, h: int) -> list[dict]:
@@ -394,6 +431,7 @@ class ValidationReport:
     portfolio: dict = field(default_factory=dict)
     folds: dict = field(default_factory=dict)
     regimes: dict = field(default_factory=dict)
+    factors: dict = field(default_factory=dict)
     verdicts: dict = field(default_factory=dict)
 
 
@@ -437,6 +475,7 @@ def evaluate(sig: pd.DataFrame, store: DataStore, p: BacktestParams, include_hol
         for bname, curve in benchmark_curves(book, stocks, part["date"].min(), end).items():
             rep.portfolio[label][f"Référence : {bname}"] = curve_metrics(curve)
         if label == "developpement":
+            rep.factors[label] = factor_diagnostics(part, h_main, p.every_n_sessions)
             rep.regimes[label] = {n: by_bucket(part, groups[n], "regime", h_main)
                                   for n in ("READY", f"Top {p.top_n} du score")}
             part = part.assign(annee=part["date"].dt.year)

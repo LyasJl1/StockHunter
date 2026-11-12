@@ -7,7 +7,7 @@ from datetime import date
 
 from sqlalchemy import select
 
-from stockhunter.db.models import Instrument, ScanRun, Score, StatusChange, StrategyVersion
+from stockhunter.db.models import Instrument, ScanRun, Score, StatusChange, StrategyVersion, ValidationRun
 from stockhunter.db.session import session_scope
 from stockhunter.scan import ScanError, run_scan
 from stockhunter.scoring.engine import fmt_pct
@@ -15,6 +15,23 @@ from stockhunter.scoring.engine import fmt_pct
 DISCLAIMER = ("Score = classement relatif multicritère au sein de l'univers suivi, PAS une probabilité de hausse. "
               "Stratégies au stade RESEARCH : non validées par backtest (phase 3). Aucun conseil d'investissement.")
 STATUS_ORDER = {"READY": 0, "DEVELOPING": 1, "WATCHLIST": 2, "REJECTED": 3}
+
+
+def validation_line(s, strategy_version_id: int) -> str:
+    """Résumé de la dernière validation historique de cette version, affiché avec chaque classement."""
+    vr = s.scalars(select(ValidationRun).where(ValidationRun.strategy_version_id == strategy_version_id)
+                   .order_by(ValidationRun.holdout_evaluated.desc(), ValidationRun.id.desc()).limit(1)).first()
+    if vr is None:
+        return "Validation historique : aucune (stratégies non testées)."
+    v = json.loads(vr.verdicts_json)
+    ok = [k for k, x in v.items() if x["decision"].startswith("ÉLIGIBLE")]
+    rej = [k.split(" ")[0] for k, x in v.items() if x["decision"].startswith("REJETÉE")]
+    scope = "y compris période réservée" if vr.holdout_evaluated else "période de développement seulement"
+    head = f"Validation historique (run #{vr.id}, {scope}) : "
+    if ok:
+        return head + "validées : " + ", ".join(ok) + (f" ; rejetées : {', '.join(rej)}" if rej else "")
+    return head + "AUCUNE stratégie validée — le classement est informatif, pas un signal fiable" + \
+        (f" ; rejetées : {', '.join(rej)}" if rej else "") + "."
 
 
 def _latest_run(s, run_id: int | None = None) -> ScanRun | None:
@@ -59,8 +76,10 @@ def cmd_top(settings, engine, args) -> int:
                             .where(StatusChange.scan_run_id == run.id)).all()
         regime = json.loads(run.regime_json)
         sectors = json.loads(run.sectors_json)
+        vline = validation_line(s, run.strategy_version_id)
 
     print(f"StockHunter — scan #{run.id} | données de clôture au {run.as_of} | {sv.name} {sv.version} [{sv.stage}]")
+    print(vline)
     print(f"Régime de marché : {regime['label']} — " + " ; ".join(regime["reasons"]))
     top_sec = sorted(sectors.items(), key=lambda x: x[1]["rank"])
     print("Secteurs (force relative 1-3 m) : " + ", ".join(f"{k} {fmt_pct(v['rs_blend'])}" for k, v in top_sec))
@@ -111,6 +130,7 @@ def cmd_explain(settings, engine, args) -> int:
         hist = s.execute(select(StatusChange).where(StatusChange.instrument_id == inst.id)
                          .order_by(StatusChange.as_of, StatusChange.id)).scalars().all()
         sv = s.get(StrategyVersion, run.strategy_version_id)
+        vline = validation_line(s, run.strategy_version_id)
 
     sub, strat = json.loads(sc.subscores_json), json.loads(sc.strategies_json)
     m, src = json.loads(sc.metrics_json), json.loads(sc.sources_json)
@@ -118,6 +138,7 @@ def cmd_explain(settings, engine, args) -> int:
     close = f"{sc.close:.2f} $".replace(".", ",") if sc.close else "N/D"
     print(f"Clôture du {sc.price_date} : {close} (cours de clôture, pas un cours en temps réel)")
     print(f"Scan #{run.id} du {run.as_of} — {sv.name} {sv.version} [{sv.stage}]")
+    print(vline)
     print(f"\nSCORE {sc.total}/100 | confiance données {sc.confidence:.2f} | rang {sc.rank or '-'} | statut {sc.status}")
     print(f"  Motif du statut : {sc.status_reason}")
     print("\nSous-scores (poids) :")

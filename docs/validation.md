@@ -35,10 +35,24 @@ Une stratégie dont la sous-performance est significative (t ≤ −2) est **rej
 - 42 actions : faible diversité, résultats sensibles à quelques titres (NVDA, LLY…).
 - Pas de spread mesuré (estimé) ; pas de données intrajournalières.
 
-## Résultats v2.0.0 — période de développement (rapport du 12/11/2026)
-Voir `docs/reports/2026-11-12-validation-v2.0.0-developpement.md`. Historique 8-K incomplet (71 %) au moment du calcul.
-- Le **score global n'a pas de pouvoir prédictif démontré** (IC ≈ 0 à 5, 20 et 60 jours).
-- READY, Top 5, B et D : ne battent pas l'univers équipondéré → restent en RESEARCH.
-- **A Early momentum : rejetée** (t = −2,1, négative chaque année).
-- **C Growth acceleration : la plus prometteuse** (+0,67 % / 20 j vs univers, positive 7 années sur 8) mais t = 1,69 < 2.
-- La règle simple « top 5 momentum 12-1 » fait aussi bien que C (t = 1,5) : le moteur ne bat pas encore une règle simple.
+## Résultats v2.0.0 — verdict final (12/11/2026)
+Rapport complet : `docs/reports/2026-11-12-validation-v2.0.0-final.md` (historique 8-K complet, période réservée
+évaluée une seule fois, méthode figée).
+
+**Aucune stratégie n'est validée. Le score global n'a pas de pouvoir prédictif démontré.**
+
+| Groupe | Développement : vs univers 20 j (t) | Période réservée : vs univers 20 j | Verdict |
+|---|---|---|---|
+| READY | −0,00 % (−0,20) | −0,01 % | reste en RESEARCH |
+| Top 5 du score | +0,16 % (0,47) | −0,27 % | reste en RESEARCH |
+| A Early momentum | −0,63 % (−2,12) | −0,29 % | **rejetée** |
+| B Earnings momentum | −0,14 % (−0,71) | +0,67 % | reste en RESEARCH |
+| C Growth acceleration | +0,61 % (1,49) | −0,70 % | reste en RESEARCH (échoue sur la période réservée) |
+| D Sector rotation | −0,05 % (−0,95) | −0,19 % | reste en RESEARCH |
+| Règle simple momentum 12-1 | +0,74 % (1,52) | +1,05 % | référence |
+
+- IC du score à 20 j : 0,003 (développement), 0,001 (période réservée).
+- Diagnostic facteur par facteur : aucun ingrédient n'a |t| ≥ 2. Les moins faibles (volatilité élevée, P/E élevé)
+  traduisent un effet bêta du marché haussier 2017-2024, pas un avantage reproductible : ils ne sont **pas**
+  retenus pour une v2.1 (ce serait du sur-ajustement).
+- Conséquence : chaque classement affiche « AUCUNE stratégie validée — informatif, pas un signal fiable ».
