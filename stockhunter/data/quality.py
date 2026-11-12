@@ -13,6 +13,7 @@ from sqlalchemy.engine import Engine
 from stockhunter.data.calendar import last_completed_session, sessions_between, trading_days
 from stockhunter.db.models import (
     DataAnomaly,
+    Filing,
     FundamentalFact,
     Instrument,
     MacroObservation,
@@ -24,7 +25,8 @@ from stockhunter.db.session import session_scope
 # Fraîcheur tolérée par fréquence macro (en jours calendaires)
 MACRO_MAX_AGE = {"Daily": 7, "Weekly": 14, "Monthly": 50, "Quarterly": 120}
 EXTREME_MOVE = 0.5  # variation journalière ajustée > 50 % sans split = suspect
-GAP_TOLERANCE = 3   # séances manquantes tolérées sur l'historique (fermetures exceptionnelles)
+GAP_TOLERANCE = 3
+PERIODIC_FORMS = ("10-Q", "10-K", "10-Q/A", "10-K/A", "20-F")   # séances manquantes tolérées sur l'historique (fermetures exceptionnelles)
 
 
 @dataclass
@@ -107,9 +109,26 @@ def check_fundamentals(engine: Engine) -> list[Finding]:
             ).one()
             if not n:
                 findings.append(Finding("fund_missing", "warning", f"{inst.symbol} : aucun fait XBRL", inst.id))
-            elif last_filed and (date.today() - last_filed).days > 120:
+                continue
+            # Contrôle précis : chaque 10-Q/10-K déposé après le dernier fait XBRL connu est un rapport
+            # publié mais absent de companyfacts -> les fondamentaux de ce titre sont en retard.
+            missing = list(s.execute(
+                select(Filing.form, Filing.filed_date, Filing.url).where(
+                    Filing.instrument_id == inst.id,
+                    Filing.form.in_(PERIODIC_FORMS),
+                    Filing.filed_date > last_filed,
+                ).order_by(Filing.filed_date)
+            ))
+            if missing:
+                lst = ", ".join(f"{f} du {d}" for f, d, _ in missing)
+                findings.append(Finding(
+                    "fund_xbrl_lag", "warning",
+                    f"{inst.symbol} : {len(missing)} rapport(s) publié(s) sans faits XBRL dans companyfacts "
+                    f"({lst}) ; derniers fondamentaux utilisables : dépôt du {last_filed} ; "
+                    f"source : {missing[-1][2]}", inst.id))
+            elif (date.today() - last_filed).days > 120:
                 findings.append(Finding("fund_stale", "info",
-                                        f"{inst.symbol} : dernier dépôt XBRL le {last_filed} (>120 j)", inst.id))
+                                        f"{inst.symbol} : aucun 10-Q/10-K depuis le {last_filed} (>120 j)", inst.id))
     return findings
 
 

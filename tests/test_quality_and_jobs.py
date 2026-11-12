@@ -88,3 +88,25 @@ def test_job_status_partial_and_failed(engine):
     assert r.status == "failed" and "ZeroDivisionError" in r.detail
     with session_scope(engine) as s:
         assert s.scalar(select(func.count()).select_from(JobRun)) == 2
+
+
+def test_fundamentals_lag_detected_against_filings(engine):
+    """Cas réel constaté sur NEE/PLD (12/11/2026) : 10-Q publiés, mais absents de companyfacts."""
+    from stockhunter.db.models import Filing, FundamentalFact
+    src = ensure_sources(engine)["sec_edgar"]
+    with session_scope(engine) as s:
+        ok = Instrument(symbol="ZZOK", asset_type="stock", cik="0999999901")
+        lag = Instrument(symbol="ZZLAG", asset_type="stock", cik="0999999902")
+        s.add_all([ok, lag])
+        s.flush()
+        for inst, fact_filed in ((ok, date(2026, 10, 30)), (lag, date(2026, 4, 23))):
+            s.add(FundamentalFact(instrument_id=inst.id, source_id=src, fact_key=f"k{inst.id}", taxonomy="us-gaap",
+                                  concept="Assets", unit="USD", period_end=date(2026, 3, 31), filed_date=fact_filed,
+                                  accession=f"a{inst.id}", value=1.0))
+            for i, d in enumerate((date(2026, 4, 23), date(2026, 7, 24), date(2026, 10, 21))):
+                s.add(Filing(instrument_id=inst.id, source_id=src, accession=f"{inst.id}-{i}", form="10-Q",
+                             filed_date=d, url=f"https://example.invalid/{inst.symbol}/{i}"))
+    from stockhunter.data.quality import check_fundamentals
+    f = check_fundamentals(engine)
+    assert [x.check for x in f] == ["fund_xbrl_lag"]
+    assert f[0].detail.startswith("ZZLAG : 2 rapport(s)") and "2026-04-23" in f[0].detail
