@@ -1,0 +1,58 @@
+name: Validation
+
+# Backtest du moteur de scoring réel sur la base de données courante (phase 3).
+on:
+  workflow_dispatch:
+    inputs:
+      holdout:
+        description: "Évaluer aussi la période réservée (une seule fois par version, méthode figée)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ingestion          # même base que l'ingestion : jamais en parallèle
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SH_DATABASE_URL: sqlite:///var/stockhunter.db
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+
+      - name: Restaurer la base
+        uses: actions/cache/restore@v5
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+          restore-keys: stockhunter-db-
+
+      - name: Migrations
+        run: stockhunter init-db
+
+      - name: Backtest
+        run: |
+          stockhunter validate --out validation-report.md \
+            --signals-cache var/signals-cache.pkl ${{ inputs.holdout && '--holdout' || '' }} > /dev/null
+          cat validation-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sauvegarder la base (trace de la validation)
+        if: success()
+        uses: actions/cache/save@v5
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+
+      - name: Publier le rapport
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: validation-report
+          path: validation-report.md
+          retention-days: 90

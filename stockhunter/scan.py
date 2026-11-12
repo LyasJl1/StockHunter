@@ -50,38 +50,89 @@ class ScanError(RuntimeError):
 
 
 # ----------------------------------------------------------------------------- chargement
-def _bars(s, instrument_id: int, as_of: date) -> pd.DataFrame:
-    rows = s.execute(
-        select(PriceBar.bar_date, PriceBar.open, PriceBar.close, PriceBar.volume, PriceBar.adj_open,
-               PriceBar.adj_high, PriceBar.adj_low, PriceBar.adj_close, PriceBar.adj_volume)
-        .where(PriceBar.instrument_id == instrument_id, PriceBar.bar_date <= as_of)
-        .order_by(PriceBar.bar_date.desc()).limit(BARS_NEEDED)
-    ).mappings().all()
-    return bars_frame([dict(r) for r in rows])
+class DataStore:
+    """Toutes les données utiles au scoring, chargées une fois en mémoire.
+
+    Chaque accesseur prend une date d'analyse et ne renvoie QUE ce qui était connu à cette date :
+    c'est l'unique point de filtrage temporel, partagé par le scan quotidien et le backtest."""
+
+    def __init__(self, engine: Engine):
+        with session_scope(engine) as s:
+            self.instruments = list(s.scalars(select(Instrument).where(Instrument.is_active.is_(True))
+                                              .order_by(Instrument.symbol)))
+            for i in self.instruments:
+                s.expunge(i)
+            ids = {i.id: i.symbol for i in self.instruments}
+            rows = s.execute(select(PriceBar.instrument_id, PriceBar.bar_date, PriceBar.open, PriceBar.close,
+                                    PriceBar.volume, PriceBar.adj_open, PriceBar.adj_high, PriceBar.adj_low,
+                                    PriceBar.adj_close, PriceBar.adj_volume)
+                             .where(PriceBar.instrument_id.in_(ids))).mappings().all()
+            df = pd.DataFrame([dict(r) for r in rows])
+            self.bars: dict[str, pd.DataFrame] = {}
+            if not df.empty:
+                for iid, g in df.groupby("instrument_id"):
+                    self.bars[ids[iid]] = bars_frame(g.drop(columns="instrument_id").to_dict("records"))
+            self.facts: dict[str, list[dict]] = {i.symbol: [] for i in self.instruments}
+            for r in s.execute(select(FundamentalFact.instrument_id, FundamentalFact.concept,
+                                      FundamentalFact.period_start, FundamentalFact.period_end,
+                                      FundamentalFact.form, FundamentalFact.filed_date, FundamentalFact.value)
+                               .where(FundamentalFact.instrument_id.in_(ids))).mappings():
+                d = dict(r)
+                self.facts[ids[d.pop("instrument_id")]].append(d)
+            self.filings: dict[str, list] = {i.symbol: [] for i in self.instruments}
+            for r in s.execute(select(Filing.instrument_id, Filing.form, Filing.filed_date, Filing.url,
+                                      Filing.items).where(Filing.instrument_id.in_(ids))
+                               .order_by(Filing.filed_date.desc())):
+                self.filings[ids[r.instrument_id]].append(r)
+            self.macro: dict[str, pd.Series] = {}
+            for code in ("VIXCLS", "T10Y2Y"):
+                obs = s.execute(select(MacroObservation.obs_date, MacroObservation.value).join(MacroSeries)
+                                .where(MacroSeries.series_code == code, MacroObservation.value.is_not(None))
+                                .order_by(MacroObservation.obs_date)).all()
+                self.macro[code] = pd.Series([o[1] for o in obs], index=pd.to_datetime([o[0] for o in obs]))
+            self.events: dict[str, list] = {}
+            for r in s.execute(select(MarketEvent.instrument_id, MarketEvent.event_date, MarketEvent.title)
+                               .where(MarketEvent.event_type == "earnings").order_by(MarketEvent.event_date)):
+                if r.instrument_id in ids:
+                    self.events.setdefault(ids[r.instrument_id], []).append(r)
+            self.latest_session = s.scalar(select(func.max(PriceBar.bar_date)))
+        self._fund_cache: dict[tuple[str, date], dict] = {}
+
+    def bars_at(self, symbol: str | None, as_of: date) -> pd.DataFrame:
+        df = self.bars.get(symbol or "")
+        if df is None:
+            return pd.DataFrame()
+        return df.loc[: pd.Timestamp(as_of)].iloc[-BARS_NEEDED:]
+
+    def macro_at(self, code: str, as_of: date) -> tuple[float, date] | None:
+        ser = self.macro.get(code)
+        if ser is None:
+            return None
+        ser = ser.loc[: pd.Timestamp(as_of)]
+        return (float(ser.iloc[-1]), ser.index[-1].date()) if len(ser) else None
+
+    def fundamentals_at(self, symbol: str, as_of: date) -> dict:
+        """Mis en cache par date du dernier dépôt connu : l'instantané ne change qu'avec un nouveau dépôt."""
+        facts = self.facts.get(symbol, [])
+        last = max((f["filed_date"] for f in facts if f["filed_date"] <= as_of), default=None)
+        key = (symbol, last)
+        if key not in self._fund_cache:
+            self._fund_cache[key] = fundamental_snapshot([f for f in facts if f["filed_date"] <= as_of], as_of) \
+                if last else {}
+        return self._fund_cache[key]
+
+    def filings_at(self, symbol: str, as_of: date) -> list:
+        return [f for f in self.filings.get(symbol, []) if f.filed_date <= as_of]
 
 
-def _latest_macro(s, code: str, as_of: date) -> tuple[float, date] | None:
-    row = s.execute(
-        select(MacroObservation.value, MacroObservation.obs_date).join(MacroSeries)
-        .where(MacroSeries.series_code == code, MacroObservation.obs_date <= as_of,
-               MacroObservation.value.is_not(None))
-        .order_by(MacroObservation.obs_date.desc()).limit(1)
-    ).first()
-    return (row[0], row[1]) if row else None
-
-
-def _earnings_event(s, inst_id: int, df: pd.DataFrame, spy: pd.DataFrame, as_of: date,
+def _earnings_event(filings: list, df: pd.DataFrame, spy: pd.DataFrame, as_of: date,
                     max_sessions: int) -> dict[str, Any] | None:
     """Dernier 8-K item 2.02 (résultats) et réaction du marché, mesurée sur données de clôture.
 
     Fenêtre de réaction : de la dernière clôture AVANT le jour de dépôt jusqu'à la clôture de la séance
     qui suit le dépôt (couvre un dépôt avant ouverture comme après clôture)."""
-    rows = s.execute(
-        select(Filing.filed_date, Filing.url, Filing.items).where(
-            Filing.instrument_id == inst_id, Filing.form.in_(("8-K", "8-K/A")),
-            Filing.filed_date <= as_of).order_by(Filing.filed_date.desc()).limit(40)
-    ).all()
-    ev = next((r for r in rows if r.items and "2.02" in r.items.split(",")), None)
+    ev = next((r for r in filings if r.form in ("8-K", "8-K/A") and r.items
+               and "2.02" in r.items.split(",")), None)
     if ev is None:
         return None
     ago = sessions_between(ev.filed_date, as_of)
@@ -102,81 +153,69 @@ def _earnings_event(s, inst_id: int, df: pd.DataFrame, spy: pd.DataFrame, as_of:
     return out
 
 
-def build_inputs(engine: Engine, as_of: date | None = None, cfg: ScoringConfig = DEFAULT_CONFIG):
-    with session_scope(engine) as s:
-        insts = list(s.scalars(select(Instrument).where(Instrument.is_active.is_(True)).order_by(Instrument.symbol)))
-        bench = next((i for i in insts if i.symbol == BENCHMARK), None)
-        if bench is None:
-            raise ScanError(f"benchmark {BENCHMARK} absent de l'univers")
-        if as_of is None:
-            as_of = s.scalar(select(func.max(PriceBar.bar_date)).where(PriceBar.instrument_id == bench.id))
-            if as_of is None:
-                raise ScanError("aucun prix pour SPY : lancer l'ingestion")
-        spy = _bars(s, bench.id, as_of)
-        if spy.empty or spy.index[-1].date() != as_of:
-            raise ScanError(f"pas de clôture SPY au {as_of} : date d'analyse invalide (jour non ouvré ?)")
+def inputs_from_store(store: DataStore, as_of: date | None = None, cfg: ScoringConfig = DEFAULT_CONFIG):
+    insts = store.instruments
+    if not any(i.symbol == BENCHMARK for i in insts):
+        raise ScanError(f"benchmark {BENCHMARK} absent de l'univers")
+    if as_of is None:
+        spy_all = store.bars.get(BENCHMARK)
+        if spy_all is None or spy_all.empty:
+            raise ScanError("aucun prix pour SPY : lancer l'ingestion")
+        as_of = spy_all.index[-1].date()
+    spy = store.bars_at(BENCHMARK, as_of)
+    if spy.empty or spy.index[-1].date() != as_of:
+        raise ScanError(f"pas de clôture SPY au {as_of} : date d'analyse invalide (jour non ouvré ?)")
 
-        frames = {i.symbol: _bars(s, i.id, as_of) for i in insts}
-        tech = {}
-        for i in insts:
-            sec = frames.get(i.sector_etf) if i.sector_etf else None
-            tech[i.symbol] = technical_snapshot(frames[i.symbol], spy, sec)
+    frames = {i.symbol: store.bars_at(i.symbol, as_of) for i in insts}
+    tech = {i.symbol: technical_snapshot(frames[i.symbol], spy, frames.get(i.sector_etf) if i.sector_etf else None)
+            for i in insts}
+    stocks = [i for i in insts if i.asset_type == "stock"]
+    above = [tech[i.symbol].get("above_sma50") for i in stocks if tech[i.symbol].get("above_sma50") is not None]
+    breadth = sum(above) / len(above) if above else None
+    regime = market_regime(tech[BENCHMARK], store.macro_at("VIXCLS", as_of), breadth, store.macro_at("T10Y2Y", as_of))
+    sectors = rank_sectors({i.symbol: tech[i.symbol] for i in insts if i.role == "sector_etf"
+                            and i.symbol != "SMH" and not tech[i.symbol].get("insufficient_history")})
 
-        stocks = [i for i in insts if i.asset_type == "stock"]
-        above = [tech[i.symbol].get("above_sma50") for i in stocks if tech[i.symbol].get("above_sma50") is not None]
-        breadth = sum(above) / len(above) if above else None
-        regime = market_regime(tech[BENCHMARK], _latest_macro(s, "VIXCLS", as_of), breadth,
-                               _latest_macro(s, "T10Y2Y", as_of))
-        sectors = rank_sectors({i.symbol: tech[i.symbol] for i in insts if i.role == "sector_etf"
-                                and i.symbol != "SMH" and not tech[i.symbol].get("insufficient_history")})
-
-        latest_session = s.scalar(select(func.max(PriceBar.bar_date)))
-        calendar_reliable = as_of >= latest_session
-        inputs: list[StockInput] = []
-        for i in insts:
-            t = tech[i.symbol]
-            stale = t.get("price_date") is not None and date.fromisoformat(t["price_date"]) < as_of
-            src = [{"type": "prix", "source": "Tiingo EOD", "detail": f"clôture du {t.get('price_date')}"}]
-            si = StockInput(symbol=i.symbol, instrument_id=i.id, asset_type=i.asset_type, tech=t,
-                            sector_etf=i.sector_etf, industry_etf=i.industry_etf, price_stale=stale, sources=src)
-            if i.asset_type == "stock":
-                facts = [dict(r) for r in s.execute(
-                    select(FundamentalFact.concept, FundamentalFact.period_start, FundamentalFact.period_end,
-                           FundamentalFact.form, FundamentalFact.filed_date, FundamentalFact.value)
-                    .where(FundamentalFact.instrument_id == i.id, FundamentalFact.filed_date <= as_of)
-                ).mappings()]
-                si.fund = fundamental_snapshot(facts, as_of)
-                si.val = valuation(si.fund, t.get("close"))
-                if si.fund.get("last_filed"):
-                    lf = date.fromisoformat(si.fund["last_filed"])
-                    si.fund_lag = [{"form": r.form, "filed_date": r.filed_date.isoformat(), "url": r.url}
-                                   for r in s.execute(select(Filing.form, Filing.filed_date, Filing.url).where(
-                                       Filing.instrument_id == i.id, Filing.form.in_(tuple(PERIODIC_FORMS)),
-                                       Filing.filed_date > lf, Filing.filed_date <= as_of))]
-                    last = s.execute(select(Filing.form, Filing.filed_date, Filing.url).where(
-                        Filing.instrument_id == i.id, Filing.form.in_(tuple(PERIODIC_FORMS)),
-                        Filing.filed_date <= lf).order_by(Filing.filed_date.desc()).limit(1)).first()
-                    if last:
-                        src.append({"type": "fondamentaux", "source": "SEC EDGAR XBRL",
-                                    "detail": f"{last.form} déposé le {last.filed_date}", "url": last.url})
-                if not frames[i.symbol].empty:
-                    si.earnings = _earnings_event(s, i.id, frames[i.symbol], spy, as_of,
-                                                  cfg.thresholds.earnings_event_max_sessions)
-                    if si.earnings:
-                        src.append({"type": "résultats", "source": "SEC EDGAR 8-K item 2.02",
-                                    "detail": f"déposé le {si.earnings['filed_date']}", "url": si.earnings["url"]})
-                if calendar_reliable:
-                    ev = s.execute(select(MarketEvent.event_date, MarketEvent.title).where(
-                        MarketEvent.instrument_id == i.id, MarketEvent.event_type == "earnings",
-                        MarketEvent.event_date > as_of).order_by(MarketEvent.event_date).limit(1)).first()
-                    if ev:
-                        si.upcoming = {"date": ev.event_date.isoformat(), "title": ev.title,
-                                       "sessions_until": sessions_between(as_of, ev.event_date)}
-                        src.append({"type": "calendrier", "source": "Finnhub (annonce non vérifiée)",
-                                    "detail": ev.title})
-            inputs.append(si)
+    calendar_reliable = store.latest_session is not None and as_of >= store.latest_session
+    inputs: list[StockInput] = []
+    for i in insts:
+        t = tech[i.symbol]
+        stale = t.get("price_date") is not None and date.fromisoformat(t["price_date"]) < as_of
+        src = [{"type": "prix", "source": "Tiingo EOD", "detail": f"clôture du {t.get('price_date')}"}]
+        si = StockInput(symbol=i.symbol, instrument_id=i.id, asset_type=i.asset_type, tech=t,
+                        sector_etf=i.sector_etf, industry_etf=i.industry_etf, price_stale=stale, sources=src)
+        if i.asset_type == "stock":
+            si.fund = store.fundamentals_at(i.symbol, as_of)
+            si.val = valuation(si.fund, t.get("close"))
+            filings = store.filings_at(i.symbol, as_of)
+            periodic = [f for f in filings if f.form in PERIODIC_FORMS]
+            if si.fund.get("last_filed"):
+                lf = date.fromisoformat(si.fund["last_filed"])
+                si.fund_lag = [{"form": f.form, "filed_date": f.filed_date.isoformat(), "url": f.url}
+                               for f in periodic if f.filed_date > lf]
+                last = next((f for f in periodic if f.filed_date <= lf), None)
+                if last:
+                    src.append({"type": "fondamentaux", "source": "SEC EDGAR XBRL",
+                                "detail": f"{last.form} déposé le {last.filed_date}", "url": last.url})
+            if not frames[i.symbol].empty:
+                si.earnings = _earnings_event(filings, frames[i.symbol], spy, as_of,
+                                              cfg.thresholds.earnings_event_max_sessions)
+                if si.earnings:
+                    src.append({"type": "résultats", "source": "SEC EDGAR 8-K item 2.02",
+                                "detail": f"déposé le {si.earnings['filed_date']}", "url": si.earnings["url"]})
+            if calendar_reliable:
+                ev = next((e for e in store.events.get(i.symbol, []) if e.event_date > as_of), None)
+                if ev:
+                    si.upcoming = {"date": ev.event_date.isoformat(), "title": ev.title,
+                                   "sessions_until": sessions_between(as_of, ev.event_date)}
+                    src.append({"type": "calendrier", "source": "Finnhub (annonce non vérifiée)", "detail": ev.title})
+        inputs.append(si)
     notes = [] if calendar_reliable else ["calendrier des résultats non utilisé (scan dans le passé)"]
     return as_of, inputs, Context(as_of=as_of, regime=regime, sectors=sectors), notes
+
+
+def build_inputs(engine: Engine, as_of: date | None = None, cfg: ScoringConfig = DEFAULT_CONFIG):
+    return inputs_from_store(DataStore(engine), as_of, cfg)
 
 
 # ----------------------------------------------------------------------------- persistance

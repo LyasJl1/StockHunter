@@ -35,8 +35,9 @@ stockhunter/
   report_cli.py        commandes scan / top / explain
   cli.py               point d'entrée `stockhunter`
 ```
-Méthode détaillée : `docs/scoring.md`.
-Phases suivantes (à créer) : `validation/ risk/ portfolio/ notifications/ reports/ dashboard/`.
+Méthode détaillée : `docs/scoring.md`. Protocole de backtest et résultats : `docs/validation.md`.
+  validation/          rejeu du moteur réel, trades, portefeuille, verdicts, rapport
+Phases suivantes (à créer) : `risk/ portfolio/ notifications/ reports/ dashboard/`.
 Cycle d'une stratégie : RESEARCH → BACKTEST → OUT-OF-SAMPLE → PAPER → PROMOTED.
 
 ## Commandes
@@ -52,6 +53,7 @@ stockhunter verify-sources          # appels réels
 stockhunter scan [--as-of AAAA-MM-JJ] [--if-new] [--require-fresh]
 stockhunter top [-n 10] [--all]
 stockhunter explain NVDA
+stockhunter validate --out rapport.md --signals-cache var/signals-cache.pkl   # backtest (3 min)
 pytest -m "not live"                # tests hors réseau
 pytest -m live                      # tests réels (clés requises)
 ```
@@ -60,6 +62,8 @@ pytest -m live                      # tests réels (clés requises)
 - Un scan est inséré, jamais modifié. Ne jamais réécrire `scores` ou `status_changes`.
 - Toute nouvelle donnée utilisée par le scoring doit être filtrée `<= as_of` ; ajouter un cas à `test_no_look_ahead`.
 - Modifier `scoring/config.py` impose d'incrémenter `SCORING_VERSION` (le scan refuse sinon).
+- Aucune règle n'est réglée en regardant la période réservée. Chercher sur la période de développement, figer,
+  puis évaluer la période réservée UNE fois (`validate --holdout`).
 
 ## Conventions
 - Python 3.12+, typage, fonctions `parse_*` pures et testées séparément des appels réseau.

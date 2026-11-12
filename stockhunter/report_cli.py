@@ -154,6 +154,27 @@ def cmd_explain(settings, engine, args) -> int:
     return 0
 
 
+def cmd_validate(settings, engine, args) -> int:
+    from pathlib import Path
+
+    from stockhunter.scoring.config import DEFAULT_CONFIG
+    from stockhunter.validation.run import render_markdown, run_validation
+    try:
+        run_id, rep, prior = run_validation(
+            engine, include_holdout=args.holdout, allow_holdout_again=args.allow_holdout_again,
+            signals_cache=Path(args.signals_cache) if args.signals_cache else None,
+            progress=lambda k, n: print(f"  rejeu {k}/{n}", flush=True) if k % 50 == 0 or k == n else None)
+    except ScanError as exc:
+        print(f"ÉCHEC : {exc}")
+        return 1
+    md = render_markdown(run_id, rep, DEFAULT_CONFIG, prior)
+    if args.out:
+        Path(args.out).write_text(md, encoding="utf-8")
+        print(f"Rapport écrit dans {args.out}")
+    print(md)
+    return 0
+
+
 def add_parsers(sub) -> dict:
     sc = sub.add_parser("scan", help="calcule et enregistre le classement")
     sc.add_argument("--as-of", help="date d'analyse AAAA-MM-JJ (séance clôturée), défaut : dernière séance")
@@ -166,4 +187,9 @@ def add_parsers(sub) -> dict:
     ex = sub.add_parser("explain", help="fiche explicative d'une action")
     ex.add_argument("symbol")
     ex.add_argument("--run", type=int)
-    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain}
+    va = sub.add_parser("validate", help="backtest du moteur de scoring réel (phase 3)")
+    va.add_argument("--holdout", action="store_true", help="évalue aussi la période réservée (une fois, méthode figée)")
+    va.add_argument("--allow-holdout-again", action="store_true")
+    va.add_argument("--out", help="fichier Markdown du rapport")
+    va.add_argument("--signals-cache", help="cache du rejeu (réutilisé si données et version identiques)")
+    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "validate": cmd_validate}

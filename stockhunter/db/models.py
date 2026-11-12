@@ -321,3 +321,22 @@ class StatusChange(Base):
     to_status: Mapped[str] = mapped_column(String(20))
     reason: Mapped[str] = mapped_column(Text)
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# =========================================================================== Phase 3 : validation
+class ValidationRun(Base):
+    """Résultat d'une validation historique. Jamais modifié. `holdout_evaluated` trace chaque consultation de
+    la période réservée : elle ne doit être évaluée qu'une fois par version, sur une méthode figée."""
+
+    __tablename__ = "validation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_version_id: Mapped[int] = mapped_column(ForeignKey("strategy_versions.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    period_start: Mapped[date] = mapped_column(Date)
+    period_end: Mapped[date] = mapped_column(Date)
+    holdout_evaluated: Mapped[bool] = mapped_column(Boolean, default=False)
+    data_fingerprint: Mapped[str] = mapped_column(String(64))
+    params_json: Mapped[str] = mapped_column(Text)
+    report_json: Mapped[str] = mapped_column(Text)
+    verdicts_json: Mapped[str] = mapped_column(Text)

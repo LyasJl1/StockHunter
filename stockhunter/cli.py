@@ -243,6 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # les URL contiennent des tokens
+    logging.getLogger("alembic").setLevel(logging.WARNING)
     settings = get_settings()
     if args.cmd == "init-db":
         migrate(settings)
