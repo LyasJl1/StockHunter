@@ -153,7 +153,8 @@ def test_validation_status_shown_with_ranking(engine):
     run_scan(engine)
     with session_scope(engine) as s:
         sv_id = s.scalar(sel(ScanRun.strategy_version_id))
-        assert "aucune (stratégies non testées)" in validation_line(s, sv_id)
+        # base vierge : la v2.0.0 est connue par le registre versionné (validée ailleurs le 12/11/2026)
+        assert "AUCUNE STRATÉGIE VALIDÉE" in validation_line(s, sv_id)
     p = BacktestParams(warmup_sessions=200, every_n_sessions=10, horizons=(5, 20),
                        holdout_start=date(2026, 9, 1), embargo_days=30, min_trades=10_000)
     run_validation(engine, include_holdout=True, allow_holdout_again=True, params=p)
