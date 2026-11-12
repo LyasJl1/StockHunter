@@ -135,5 +135,6 @@ def freshness(engine: Engine) -> dict[str, Any]:
                   for n in s.scalars(select(NotificationLog).order_by(NotificationLog.id.desc()).limit(8))]
         crit = s.scalar(select(func.count()).select_from(DataAnomaly).where(
             DataAnomaly.resolved_at.is_(None), DataAnomaly.severity == "critical")) or 0
+    from stockhunter.data.calendar import staleness
     return {"last_price": last_price, "jobs": jobs, "alerts": alerts, "critical": crit,
-            "now": datetime.now(timezone.utc)}
+            "now": datetime.now(timezone.utc), "stale": staleness(last_price)}

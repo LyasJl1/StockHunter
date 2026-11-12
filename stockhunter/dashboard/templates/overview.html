@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 {% if not meta %}<div class="card">Aucun scan disponible : lancer l'ingestion puis <code>stockhunter scan</code>.</div>{% else %}
+{% if fresh.stale.stale %}<div class="banner" style="border-color:var(--neg)">⚠️ Données en retard : dernière clôture en base {{ fresh.last_price|d }}, séance attendue {{ fresh.stale.expected|d }} ({{ fresh.stale.lag if fresh.stale.lag is not none else '?' }} séance(s) manquante(s)). Les chiffres ci-dessous ne sont pas à jour.</div>{% endif %}
 <div class="banner">{{ meta.validation }}</div>
 <div class="grid g4">
   <div class="card"><h2>Régime de marché</h2><div class="kpi">{{ meta.regime.label }}</div>

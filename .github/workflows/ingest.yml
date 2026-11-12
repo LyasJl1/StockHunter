@@ -110,10 +110,5 @@ jobs:
           path: var
           key: stockhunter-db-${{ github.run_id }}
 
-      - name: Publier la base (artefact)
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: stockhunter-db
-          path: var/stockhunter.db
-          retention-days: 14
+      # Pas d'artefact contenant la base ou les cours : le dépôt est public et les licences Tiingo / Massive
+      # interdisent la redistribution. Les données restent dans le cache Actions et la base Railway.

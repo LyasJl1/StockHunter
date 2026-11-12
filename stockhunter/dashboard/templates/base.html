@@ -52,5 +52,11 @@ ul.reasons{margin:6px 0;padding-left:18px}.tabs a{margin-right:12px;padding-bott
 {% block content %}{% endblock %}
 <footer>Analyse automatisée, pas un conseil en investissement. Cours de clôture datés, jamais en temps réel. Un score n'est pas une probabilité. Le portefeuille simulé et le portefeuille réel ne sont jamais mélangés.</footer>
 </main>
+<script nonce="{{ request.state.nonce }}">
+document.addEventListener('submit', ev => {
+  const msg = ev.target.dataset && ev.target.dataset.confirm;
+  if (msg && !confirm(msg)) ev.preventDefault();
+});
+</script>
 </body>
 </html>

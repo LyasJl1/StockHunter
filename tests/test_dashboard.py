@@ -105,3 +105,30 @@ def test_settings_sources_from_database(engine, client):
     assert "13/11/2026 00:20 (Paris)" in page          # tiingo : appel réussi
     assert "23:21" not in page                      # fred : échec non compté comme réussi
     assert "MANQUANT: SH_TIINGO_API_KEY" not in page
+
+
+def test_csp_nonce_and_no_unsafe_inline_script(engine, client):
+    login(client)
+    r = client.get("/performance")
+    csp = r.headers["content-security-policy"]
+    assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
+    nonce = re.search(r"'nonce-([^']+)'", csp).group(1)
+    scripts = re.findall(r"<script(?![^>]*\bsrc=)([^>]*)>", r.text)
+    assert scripts and all(f'nonce="{nonce}"' in s for s in scripts)
+    assert "onsubmit=" not in client.get("/portfolio?tab=real").text      # aucun gestionnaire inline
+    assert client.get("/performance").headers["content-security-policy"] != csp   # nonce renouvelé
+
+
+def test_login_rate_limit_uses_proxy_ip_and_global_cap(engine, settings):
+    app = create_app(engine, settings, secret="s" * 48, password_hash=hash_password(PW), secure_cookies=False)
+    c = TestClient(app)
+    for _ in range(5):
+        c.post("/login", data={"password": "faux"}, headers={"X-Forwarded-For": "1.1.1.1, 10.0.0.1"})
+    # même client derrière le proxy -> bloqué ; un autre visiteur ne l'est pas
+    assert c.post("/login", data={"password": PW}, headers={"X-Forwarded-For": "1.1.1.1, 10.0.0.1"}).status_code == 429
+    assert c.post("/login", data={"password": PW}, headers={"X-Forwarded-For": "10.0.0.2"},
+                  follow_redirects=False).status_code == 303
+    # plafond global : 30 échecs toutes IP confondues bloquent la connexion
+    for i in range(30):
+        c.post("/login", data={"password": "faux"}, headers={"X-Forwarded-For": f"9.9.{i}.9"})
+    assert c.post("/login", data={"password": PW}, headers={"X-Forwarded-For": "8.8.8.8"}).status_code == 429

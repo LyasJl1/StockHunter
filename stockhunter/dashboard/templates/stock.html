@@ -52,7 +52,7 @@
   <table>{% for e in tr.events %}<tr><td>{{ e.date|d }}</td><td>{{ e.kind }}</td><td class="sub">{{ e.detail }}</td></tr>{% endfor %}</table>{% endfor %}</div>{% endif %}
 {% if s %}<div class="card" style="margin-top:16px"><h2>Sources</h2><ul class="reasons">
   {% for x in s.sources %}<li>[{{ x.type }}] {{ x.source }} — {{ x.detail }}{% if x.url %} — <a href="{{ x.url }}" target="_blank" rel="noopener">lien</a>{% endif %}</li>{% endfor %}</ul></div>{% endif %}
-<script>
+<script nonce="{{ request.state.nonce }}">
 fetch('/api/prices/{{ i.symbol }}').then(r => r.json()).then(p => {
   const css = getComputedStyle(document.documentElement);
   new Chart(document.getElementById('px'), {type: 'line', data: {labels: p.dates, datasets: [

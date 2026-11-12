@@ -54,7 +54,7 @@
 <tr><th>Date</th><th>Action</th><th>Type</th><th class="r">Quantité</th><th class="r">Prix / montant</th><th class="r">Frais</th><th>Note</th><th></th></tr>
 {% for t in real.transactions|reverse %}<tr><td>{{ t.trade_date|d }}</td><td>{{ t.symbol }}</td><td>{{ {'BUY':'Achat','SELL':'Vente','DIVIDEND':'Dividende'}[t.kind] }}</td>
 <td class="r">{{ t.quantity|num(4) }}</td><td class="r">{{ t.price|num }} {{ t.currency }}</td><td class="r">{{ t.fees|num }}</td><td class="sub">{{ t.note or '' }}</td>
-<td><form method="post" action="/portfolio/transactions/{{ t.id }}/delete" onsubmit="return confirm('Supprimer cette opération ?')"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Supprimer</button></form></td></tr>
+<td><form method="post" action="/portfolio/transactions/{{ t.id }}/delete" data-confirm="Supprimer cette opération ?"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Supprimer</button></form></td></tr>
 {% else %}<tr><td colspan="8" class="muted">—</td></tr>{% endfor %}</table></div>
 {% endif %}
 {% endblock %}

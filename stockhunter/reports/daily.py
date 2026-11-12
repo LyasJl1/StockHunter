@@ -99,6 +99,11 @@ def build_report(engine: Engine, kind: str = "evening", now: datetime | None = N
     L = [f"<b>STOCKHUNTER AI — {title}</b>",
          f"Données de clôture du <b>{as_of.strftime('%d/%m/%Y')}</b> (pas de cours en temps réel) · généré "
          f"{now.astimezone(ZoneInfo('Europe/Paris')).strftime('%d/%m %H:%M')} (heure de Paris)", ""]
+    from stockhunter.data.calendar import staleness
+    st = staleness(as_of, now)
+    if st["stale"]:
+        L[-1:-1] = [f"⚠️ <b>Données en retard</b> : séance attendue {st['expected'].strftime('%d/%m/%Y')}, "
+                    f"dernier scan sur la clôture du {as_of.strftime('%d/%m/%Y')}. Ce rapport n'est pas à jour."]
 
     # 1. Marché
     L += ["<b>1. État du marché</b>",

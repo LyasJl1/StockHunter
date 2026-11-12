@@ -16,8 +16,8 @@
 {% for r in by_strategy %}<tr><td>{{ r.strategie }}</td><td class="r">{{ r.trades }}</td><td class="r">{{ (r.gagnants / r.trades)|pct(0, false) }}</td>
 <td class="r {{ 'pos' if r.pnl>0 else 'neg' }}">{{ r.pnl|num(0) }} $</td><td class="r">{{ (r.jours / r.trades)|num(1) }} j</td></tr>
 {% else %}<tr><td colspan="5" class="muted">Aucun trade clos : moins de 10 trades ne permettent de rien conclure.</td></tr>{% endfor %}</table></div>
-<script>
-const c = {{ curve|safe }};
+<script nonce="{{ request.state.nonce }}">
+const c = JSON.parse({{ curve|tojson }});
 if (c.length) {
   const css = getComputedStyle(document.documentElement);
   const e0 = c[0].equity, s0 = c.find(x => x.spy)?.spy;

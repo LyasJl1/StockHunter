@@ -54,6 +54,16 @@ def fr_date(d):
 PARIS = ZoneInfo("Europe/Paris")
 
 
+def client_ip(request: Request) -> str:
+    """IP du visiteur. Derrière le proxy Railway, request.client est le proxy : on prend la DERNIÈRE adresse de
+    X-Forwarded-For, ajoutée par le proxy lui-même (les précédentes peuvent être falsifiées par le client).
+    Un plafond global de tentatives s'applique de toute façon."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[-1].strip() or "?"
+    return request.client.host if request.client else "?"
+
+
 def fr_time(t, fmt="%d/%m %H:%M"):
     """Horodatage affiché à l'heure de Paris (une date sans fuseau est en UTC dans la base)."""
     if not isinstance(t, datetime):
@@ -71,6 +81,7 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
         raise RuntimeError("SH_DASHBOARD_SECRET et SH_DASHBOARD_PASSWORD_HASH sont requis "
                            "(`stockhunter dashboard hash-password` génère le hachage)")
     sessions, limiter = Sessions(secret), RateLimiter()
+    global_limiter = RateLimiter(max_failures=30, window_s=900)   # plafond toutes IP confondues (anti force brute)
     app = FastAPI(title="StockHunter AI", docs_url=None, redoc_url=None, openapi_url=None)
     tpl = Jinja2Templates(directory=str(TEMPLATES))
     # scripts embarqués (versions figées, aucune dépendance à un CDN externe)
@@ -95,13 +106,18 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
+        # nonce par requête : seuls les scripts inline marqués par le serveur s'exécutent (pas de 'unsafe-inline')
+        request.state.nonce = secrets.token_urlsafe(16)
         resp = await call_next(request)
         resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["Referrer-Policy"] = "same-origin"
-        resp.headers["Content-Security-Policy"] = ("default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        resp.headers["Cache-Control"] = "no-store"
+        if secure_cookies:
+            resp.headers["Strict-Transport-Security"] = "max-age=31536000"
+        resp.headers["Content-Security-Policy"] = (f"default-src 'self'; script-src 'self' 'nonce-{request.state.nonce}'; "
                                                    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-                                                   "frame-ancestors 'none'")
+                                                   "frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
         return resp
 
     # ------------------------------------------------------------------ santé et connexion
@@ -116,12 +132,13 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
 
     @app.post("/login")
     def login(request: Request, password: str = Form(...)):
-        ip = request.client.host if request.client else "?"
-        if limiter.blocked(ip):
+        ip = client_ip(request)
+        if limiter.blocked(ip) or global_limiter.blocked("*"):
             return tpl.TemplateResponse(request, "login.html", {"error": "Trop de tentatives : réessayer dans 15 minutes."},
                                         status_code=429)
         if not verify_password(password, password_hash):
             limiter.fail(ip)
+            global_limiter.fail("*")
             return tpl.TemplateResponse(request, "login.html", {"error": "Mot de passe incorrect."}, status_code=401)
         limiter.reset(ip)
         resp = RedirectResponse("/", status_code=303)

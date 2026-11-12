@@ -112,12 +112,14 @@ def build(engine: Engine, symbol: str, as_of: date | None = None) -> Synthesis |
             NewsItem.published_at >= cutoff - timedelta(days=CATALYST_DAYS)).order_by(NewsItem.published_at.desc())))
         upcoming = list(s.scalars(select(MarketEvent).where(
             MarketEvent.instrument_id == inst.id, MarketEvent.event_type == "earnings",
-            MarketEvent.event_date > day).order_by(MarketEvent.event_date).limit(1)))
+            MarketEvent.event_date > day, MarketEvent.fetched_at < cutoff)   # connu à la date d'analyse
+            .order_by(MarketEvent.event_date).limit(1)))
         trades = list(s.scalars(select(PaperTrade).where(
-            PaperTrade.instrument_id == inst.id, PaperTrade.status.in_(("PLANNED", "OPEN")))))
+            PaperTrade.instrument_id == inst.id, PaperTrade.status.in_(("PLANNED", "OPEN")),
+            PaperTrade.signal_date <= day)))
         anomalies = list(s.scalars(select(DataAnomaly).where(
             DataAnomaly.instrument_id == inst.id, DataAnomaly.resolved_at.is_(None),
-            DataAnomaly.severity.in_(("warning", "critical"))).order_by(DataAnomaly.id.desc()).limit(3)))
+            DataAnomaly.severity.in_(("warning", "critical")), DataAnomaly.detected_at < cutoff).order_by(DataAnomaly.id.desc()).limit(3)))
         n_total = s.scalar(select(func.count()).select_from(Score).where(Score.scan_run_id == run.id)) if run else 0
         return _compose(inst, sc, run, day, filings, news, upcoming, trades, anomalies, n_total)
 

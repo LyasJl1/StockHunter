@@ -61,3 +61,15 @@ def sessions_between(a: date, b: date) -> int:
     if b <= a:
         return 0
     return len(trading_days(pd.Timestamp(a) + pd.Timedelta(days=1), b))
+
+
+def staleness(last_bar: date | None, now=None) -> dict:
+    """Retard des données EOD : séance attendue (jour de New York, séance du jour jamais comptée) et nombre de
+    séances manquantes. Sert à ne jamais présenter une clôture ancienne comme à jour."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    now = now or datetime.now(timezone.utc)
+    expected = last_completed_session(now.astimezone(ZoneInfo("America/New_York")).date())
+    lag = None if last_bar is None else sessions_between(last_bar, expected)
+    return {"expected": expected, "lag": lag, "stale": last_bar is None or lag >= 1}

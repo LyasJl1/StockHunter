@@ -140,3 +140,15 @@ def test_analyse_command(engine):
     assert "hors" in answer(engine, "/analyse NOPE") or "ne fait pas partie" in answer(engine, "/analyse NOPE")
     assert "Usage" in answer(engine, "/analyse")
     assert "/analyse" in answer(engine, "/help")
+
+
+def test_staleness_uses_new_york_day():
+    from stockhunter.data.calendar import staleness
+    from datetime import date
+    morning_paris = datetime(2026, 11, 13, 7, 0, tzinfo=UTC)      # 8 h à Paris, 2 h à New York le 13
+    assert staleness(date(2026, 11, 12), morning_paris)["stale"] is False
+    st = staleness(date(2026, 11, 11), morning_paris)
+    assert st["stale"] and st["lag"] == 1 and st["expected"] == date(2026, 11, 12)
+    evening = datetime(2026, 11, 12, 23, 20, tzinfo=UTC)          # 18 h 20 à New York : séance du 12 pas comptée
+    assert staleness(date(2026, 11, 11), evening)["stale"] is False
+    assert staleness(None, evening)["stale"] is True
