@@ -13,6 +13,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 
+from stockhunter.data.calendar import last_completed_session
 from stockhunter.data.http import NotFound
 from stockhunter.data.providers import (
     FRED_SERIES,
@@ -118,7 +119,13 @@ def ingest_prices(engine: Engine, ctx: JobContext, tiingo: TiingoProvider, histo
     # Les séries jamais chargées ou les plus anciennes passent en premier : si le quota coupe le run,
     # le suivant reprend là où l'on s'est arrêté.
     todo = sorted(_instruments(engine, symbols), key=lambda i: (i.last_price_date is not None, i.last_price_date or today))
+    # Une série qui contient déjà la dernière séance clôturée n'a rien de nouveau à recevoir :
+    # pas d'appel, donc pas de quota consommé (un run relancé dans la journée ne coûte rien).
+    expected = last_completed_session(today)
     for inst in todo:
+        if not full and inst.last_price_date is not None and inst.last_price_date >= expected:
+            ctx.success()
+            continue
         try:
             # 1 seul appel par symbole (pas d'appel métadonnées : nom = SEC pour les actions, CSV pour les ETF)
             incremental = (not full) and inst.last_price_date is not None

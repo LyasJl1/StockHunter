@@ -68,10 +68,16 @@ def test_prices_initial_then_incremental_is_idempotent(engine, settings):
     n1 = count(engine, PriceBar)
     assert n1 > 3 * 240
 
+    # même jour : toutes les séries contiennent déjà la séance du 11/11 -> aucun appel, aucun quota
     calls.clear()
-    ingestion.ingest_prices(engine, JobContext(run_id=0), tiingo, 1, today=TODAY)
-    assert count(engine, PriceBar) == n1  # aucun doublon
-    assert all(start == date(2026, 11, 4) for _, start in calls)  # incrémental avec recouvrement de 7 j
+    ctx = JobContext(run_id=0)
+    ingestion.ingest_prices(engine, ctx, tiingo, 1, today=TODAY)
+    assert calls == [] and ctx.ok == 3
+
+    # lendemain : la séance du 12/11 manque -> incrémental avec recouvrement de 7 j, sans doublon
+    ingestion.ingest_prices(engine, JobContext(run_id=0), tiingo, 1, today=date(2026, 11, 13))
+    assert len(calls) == 3 and all(start == date(2026, 11, 4) for _, start in calls)
+    assert count(engine, PriceBar) == n1
     with session_scope(engine) as s:
         assert s.scalar(select(Instrument.last_price_date).where(Instrument.symbol == "ZZTA")) == date(2026, 11, 11)
 
