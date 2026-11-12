@@ -382,6 +382,37 @@ def cmd_analyse(settings, engine, args) -> int:
     return 0
 
 
+def cmd_lab(settings, engine, args) -> int:
+    """Laboratoire de recherche v3 : programme pré-enregistré sur l'univers large, registre des expériences."""
+    import json as _json
+
+    from stockhunter.lab import registry
+    if args.action == "registry":
+        reg = registry.load()
+        fam = registry.family_pvalues(reg)
+        print(f"{len(registry.tests(reg))} tests dans la famille ; périodes réservées :")
+        for h in reg["periodes_reservees"]:
+            print(f"  - {h['etude']} : {h['etat']}")
+        for e in reg["experiences"]:
+            p = fam.get(e["id"], {})
+            print(f"  {e['id']:14} {e.get('t') if e.get('t') is not None else '':>6}  "
+                  f"{('p=%.3f holm=%.3f' % (p['p'], p['holm'])) if p else '':24} {e['decision']}")
+        return 0
+    from stockhunter.lab.panel import load_panel
+    from stockhunter.lab.run import render, run_program
+    from stockhunter.market.store import MarketStore
+    end = date.fromisoformat(args.end) if args.end else None
+    res = run_program(load_panel(engine, MarketStore(settings.market_dir), end))
+    reg = registry.record_run(registry.load(), _json.loads(_json.dumps(res, default=str)))
+    text = render(res, registry.family_pvalues(reg))
+    if args.out:
+        Path(args.out).write_text(text)
+    if args.json:
+        Path(args.json).write_text(_json.dumps(res, default=str, ensure_ascii=False))
+    print(text)
+    return 0
+
+
 def add_parsers(sub) -> dict:
     sc = sub.add_parser("scan", help="calcule et enregistre le classement")
     sc.add_argument("--as-of", help="date d'analyse AAAA-MM-JJ (séance clôturée), défaut : dernière séance")
@@ -398,6 +429,11 @@ def add_parsers(sub) -> dict:
     an.add_argument("symbol")
     an.add_argument("--as-of", help="date AAAA-MM-JJ (point-in-time), défaut : dernier scan")
     an.add_argument("--out", help="fichier Markdown")
+    lb = sub.add_parser("lab", help="laboratoire de recherche v3 (programme pré-enregistré, registre)")
+    lb.add_argument("action", choices=["run", "registry"])
+    lb.add_argument("--end", help="dernière séance utilisée AAAA-MM-JJ (défaut : toutes)")
+    lb.add_argument("--out")
+    lb.add_argument("--json")
     va = sub.add_parser("validate", help="backtest du moteur de scoring réel (phase 3)")
     va.add_argument("--holdout", action="store_true", help="évalue aussi la période réservée (une fois, méthode figée)")
     va.add_argument("--allow-holdout-again", action="store_true")
@@ -429,6 +465,6 @@ def add_parsers(sub) -> dict:
     cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
     cp.add_argument("action", choices=["copy-to"])
     cp.add_argument("target", help="URL de la base cible, déjà migrée et vide")
-    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "validate": cmd_validate, "market": cmd_market,
+    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
             "dashboard": cmd_dashboard, "db": cmd_db}
