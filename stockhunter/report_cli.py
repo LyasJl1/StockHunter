@@ -238,6 +238,34 @@ def cmd_market(settings, engine, args) -> int:
     return 0 if args.action == "status" or not todo else 2
 
 
+def cmd_research(settings, engine, args) -> int:
+    import json as _json
+    from pathlib import Path
+
+    from stockhunter.market.store import MarketStore
+    from stockhunter.research import broad
+    from stockhunter.validation.run import LEDGER
+
+    ledger = _json.loads(LEDGER.read_text(encoding="utf-8")) if LEDGER.exists() else {"consultations": []}
+    seen = [c for c in ledger["consultations"] if c["name"] == broad.STUDY]
+    if args.holdout and seen and not args.allow_holdout_again:
+        print(f"REFUS : la période réservée de l'étude {broad.STUDY} a déjà été évaluée le {seen[0]['date']}.")
+        return 1
+    try:
+        res = broad.run_study(engine, MarketStore(settings.market_dir), include_holdout=args.holdout)
+    except RuntimeError as exc:
+        print(f"ÉCHEC : {exc}")
+        return 1
+    md = broad.render(res)
+    if args.holdout:
+        md += ("\n\n> Ajouter cette consultation au registre `stockhunter/validation/holdout_ledger.json` "
+               f"(name = {broad.STUDY}).")
+    if args.out:
+        Path(args.out).write_text(md, encoding="utf-8")
+    print(md)
+    return 0
+
+
 def add_parsers(sub) -> dict:
     sc = sub.add_parser("scan", help="calcule et enregistre le classement")
     sc.add_argument("--as-of", help="date d'analyse AAAA-MM-JJ (séance clôturée), défaut : dernière séance")
@@ -259,4 +287,10 @@ def add_parsers(sub) -> dict:
     mk.add_argument("action", choices=["sync", "status"])
     mk.add_argument("--max-calls", type=int, help="nombre max de séances à télécharger dans ce run")
     mk.add_argument("--reference", action="store_true", help="forcer le rafraîchissement du référentiel")
-    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "validate": cmd_validate, "market": cmd_market}
+    rs = sub.add_parser("research", help="études pré-enregistrées")
+    rs.add_argument("study", choices=["broad"])
+    rs.add_argument("--holdout", action="store_true")
+    rs.add_argument("--allow-holdout-again", action="store_true")
+    rs.add_argument("--out")
+    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "validate": cmd_validate, "market": cmd_market,
+            "research": cmd_research}

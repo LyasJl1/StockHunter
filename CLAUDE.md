@@ -37,6 +37,8 @@ stockhunter/
 ```
 Méthode détaillée : `docs/scoring.md`. Protocole de backtest et résultats : `docs/validation.md`.
   validation/          rejeu du moteur réel, trades, portefeuille, verdicts, rapport
+  market/              univers large : Massive -> Parquet par séance (brut), référentiel avec radiés, splits
+  research/            études pré-enregistrées (protocole écrit avant les données, voir docs/research/)
 Phases suivantes (à créer) : `risk/ portfolio/ notifications/ reports/ dashboard/`.
 Cycle d'une stratégie : RESEARCH → BACKTEST → OUT-OF-SAMPLE → PAPER → PROMOTED.
 
@@ -54,6 +56,8 @@ stockhunter scan [--as-of AAAA-MM-JJ] [--if-new] [--require-fresh]
 stockhunter top [-n 10] [--all]
 stockhunter explain NVDA
 stockhunter validate --out rapport.md --signals-cache var/signals-cache.pkl   # backtest (3 min)
+stockhunter market sync|status      # univers large : toutes les actions US (Massive, gratuit, 2 ans)
+stockhunter research broad [--out f.md]   # étude pré-enregistrée (docs/research/)
 pytest -m "not live"                # tests hors réseau
 pytest -m live                      # tests réels (clés requises)
 ```
@@ -62,6 +66,7 @@ pytest -m live                      # tests réels (clés requises)
 - Un scan est inséré, jamais modifié. Ne jamais réécrire `scores` ou `status_changes`.
 - Toute nouvelle donnée utilisée par le scoring doit être filtrée `<= as_of` ; ajouter un cas à `test_no_look_ahead`.
 - Modifier `scoring/config.py` impose d'incrémenter `SCORING_VERSION` (le scan refuse sinon).
+- Une étude de recherche suit son pré-enregistrement (docs/research/) : pas de réglage au vu des résultats.
 - Aucune règle n'est réglée en regardant la période réservée. Chercher sur la période de développement, figer,
   puis évaluer la période réservée UNE fois (`validate --holdout`).
 
