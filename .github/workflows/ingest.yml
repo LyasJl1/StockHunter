@@ -1,0 +1,89 @@
+name: Ingestion
+
+# Collecte réelle des données. Stockage provisoire GRATUIT : la base SQLite est conservée d'un run à l'autre
+# via le cache GitHub Actions (éviction après 7 jours sans run) et publiée en artefact téléchargeable.
+# Remplacement prévu : PostgreSQL (Railway) en phase 7, après validation du coût.
+
+on:
+  workflow_dispatch:
+    inputs:
+      what:
+        description: "Données à collecter"
+        default: all
+        type: choice
+        options: [all, prices, fundamentals, macro, earnings]
+  schedule:
+    # Mar–sam 23:15 UTC : après publication des clôtures US de lun–ven
+    - cron: "15 23 * * 2-6"
+
+concurrency:
+  group: ingestion          # jamais deux ingestions en parallèle sur la même base
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 60
+    env:
+      SH_DATABASE_URL: sqlite:///var/stockhunter.db
+      SH_CACHE_DIR: var/cache
+      SH_SEC_USER_AGENT: ${{ secrets.SH_SEC_USER_AGENT }}
+      SH_TIINGO_API_KEY: ${{ secrets.SH_TIINGO_API_KEY }}
+      SH_FRED_API_KEY: ${{ secrets.SH_FRED_API_KEY }}
+      SH_FINNHUB_API_KEY: ${{ secrets.SH_FINNHUB_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+
+      - name: Restaurer la base
+        uses: actions/cache/restore@v4
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+          restore-keys: stockhunter-db-
+
+      - name: Migrations
+        run: stockhunter init-db
+
+      - name: Univers
+        run: stockhunter sync-universe || echo "::warning::sync-universe partiel"
+
+      - name: Ingestion
+        run: stockhunter ingest ${{ inputs.what || 'all' }} || echo "::warning::ingestion partielle (quota atteint ou erreurs, voir le log)"
+
+      - name: Contrôles qualité
+        run: stockhunter quality || echo "::warning::anomalies critiques détectées"
+
+      - name: Rapport
+        if: always()
+        run: |
+          {
+            echo '## StockHunter — état des données'
+            echo '```'
+            stockhunter status
+            echo
+            stockhunter prices SPY -n 5 || true
+            echo
+            stockhunter prices NVDA -n 5 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          stockhunter status
+
+      - name: Sauvegarder la base
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+
+      - name: Publier la base (artefact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stockhunter-db
+          path: var/stockhunter.db
+          retention-days: 14
