@@ -1,0 +1,63 @@
+name: Univers large - chargement
+
+# Télécharge les séances manquantes de tout le marché US (Massive, plan gratuit : 5 appels/min).
+# Premier lancement : ~504 séances, environ 1 h 45. Relançable sans risque : reprend où il s'est arrêté.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ingestion
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 170
+    env:
+      SH_DATABASE_URL: sqlite:///var/stockhunter.db
+      SH_CACHE_DIR: var/cache
+      SH_MARKET_DIR: var/market
+      SH_MASSIVE_API_KEY: ${{ secrets.SH_MASSIVE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+
+      - name: Restaurer la base
+        uses: actions/cache/restore@v5
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+          restore-keys: stockhunter-db-
+
+      - name: Migrations
+        run: stockhunter init-db
+
+      - name: Chargement (arrêt propre à 160 min, reprise au prochain lancement)
+        run: |
+          timeout 160m stockhunter market sync --reference || echo "::warning::chargement incomplet - relancer ce workflow"
+
+      - name: État
+        if: always()
+        run: |
+          stockhunter market status | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Sauvegarder la base
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+
+      - name: Publier les données (pour analyse)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: stockhunter-market
+          path: |
+            var/stockhunter.db
+            var/market/
+          retention-days: 14

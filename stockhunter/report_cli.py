@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from stockhunter.db.models import Instrument, ScanRun, Score, StatusChange, StrategyVersion, ValidationRun
 from stockhunter.db.session import session_scope
@@ -196,6 +196,48 @@ def cmd_validate(settings, engine, args) -> int:
     return 0
 
 
+def cmd_market(settings, engine, args) -> int:
+    from datetime import date as _date
+
+    from stockhunter.data.http import ProviderError
+    from stockhunter.db.models import MarketSplit, MarketTicker
+    from stockhunter.jobs.runner import run_job
+    from stockhunter.market.provider import MassiveProvider
+    from stockhunter.market.store import MarketStore
+    from stockhunter.market.sync import missing_sessions, sync_reference, sync_sessions, sync_splits
+
+    store = MarketStore(settings.market_dir)
+    if args.action == "sync":
+        try:
+            mv = MassiveProvider(settings, engine)
+        except ProviderError as exc:
+            print(f"IGNORÉ : {exc}")
+            return 2
+        today = _date.today()
+
+        def job(ctx):
+            sync_reference(engine, ctx, mv, force=args.reference)
+            sync_splits(engine, ctx, mv, today, settings.market_history_days)
+            sync_sessions(ctx, mv, store, today, settings.market_history_days, args.max_calls)
+
+        run = run_job(engine, "market_sync", job)
+        print(f"[market_sync] statut={run.status} ok={run.items_ok} échecs={run.items_failed}")
+        if run.detail:
+            print("  " + run.detail.replace("\n", "\n  ")[:2000])
+    sessions = store.sessions()
+    todo = missing_sessions(store, _date.today(), settings.market_history_days)
+    with session_scope(engine) as s:
+        n_t = s.scalar(select(func.count()).select_from(MarketTicker))
+        n_cs = s.scalar(select(func.count()).select_from(MarketTicker).where(MarketTicker.type == "CS"))
+        n_del = s.scalar(select(func.count()).select_from(MarketTicker).where(MarketTicker.active.is_(False)))
+        n_sp = s.scalar(select(func.count()).select_from(MarketSplit))
+    print(f"Univers large (Massive) : {len(sessions)} séances stockées"
+          + (f" ({sessions[0]} → {sessions[-1]})" if sessions else "")
+          + f", {len(todo)} manquante(s) sur les {settings.market_history_days} visées")
+    print(f"Référentiel : {n_t} titres dont {n_cs} actions ordinaires, {n_del} retirés de la cote ; {n_sp} splits")
+    return 0 if args.action == "status" or not todo else 2
+
+
 def add_parsers(sub) -> dict:
     sc = sub.add_parser("scan", help="calcule et enregistre le classement")
     sc.add_argument("--as-of", help="date d'analyse AAAA-MM-JJ (séance clôturée), défaut : dernière séance")
@@ -213,4 +255,8 @@ def add_parsers(sub) -> dict:
     va.add_argument("--allow-holdout-again", action="store_true")
     va.add_argument("--out", help="fichier Markdown du rapport")
     va.add_argument("--signals-cache", help="cache du rejeu (réutilisé si données et version identiques)")
-    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "validate": cmd_validate}
+    mk = sub.add_parser("market", help="univers large : toutes les actions US (Massive)")
+    mk.add_argument("action", choices=["sync", "status"])
+    mk.add_argument("--max-calls", type=int, help="nombre max de séances à télécharger dans ce run")
+    mk.add_argument("--reference", action="store_true", help="forcer le rafraîchissement du référentiel")
+    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "validate": cmd_validate, "market": cmd_market}

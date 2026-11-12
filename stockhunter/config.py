@@ -22,6 +22,8 @@ class ProviderLimits(BaseSettings):
     fred_per_minute: int = 100
     # Finnhub Free : 60 req/min (sources tierces mentionnent parfois 30) -> prudence
     finnhub_per_minute: int = 30
+    # Massive (ex-Polygon) Stocks Basic gratuit : 5 appels/min, 2 ans d'historique
+    massive_per_minute: int = 5
 
 
 class Settings(BaseSettings):
@@ -33,6 +35,9 @@ class Settings(BaseSettings):
     tiingo_api_key: SecretStr | None = None
     fred_api_key: SecretStr | None = None
     finnhub_api_key: SecretStr | None = None
+    massive_api_key: SecretStr | None = None
+    market_dir: Path = Path("./var/market")
+    market_history_days: int = Field(default=504, ge=20, le=504)  # plan gratuit Massive : 2 ans
 
     universe_file: Path | None = None
     price_history_years: int = Field(default=10, ge=1, le=40)
@@ -56,6 +61,7 @@ class Settings(BaseSettings):
             "tiingo": "configuré" if self.tiingo_api_key else "MANQUANT: SH_TIINGO_API_KEY",
             "fred": "configuré" if self.fred_api_key else "MANQUANT: SH_FRED_API_KEY",
             "finnhub": "configuré" if self.finnhub_api_key else "optionnel: SH_FINNHUB_API_KEY absent",
+            "massive": "configuré" if self.massive_api_key else "MANQUANT: SH_MASSIVE_API_KEY (univers large)",
         }
 
 

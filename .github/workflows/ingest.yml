@@ -34,6 +34,8 @@ jobs:
       SH_TIINGO_API_KEY: ${{ secrets.SH_TIINGO_API_KEY }}
       SH_FRED_API_KEY: ${{ secrets.SH_FRED_API_KEY }}
       SH_FINNHUB_API_KEY: ${{ secrets.SH_FINNHUB_API_KEY }}
+      SH_MASSIVE_API_KEY: ${{ secrets.SH_MASSIVE_API_KEY }}
+      SH_MARKET_DIR: var/market
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -57,6 +59,9 @@ jobs:
       - name: Ingestion
         run: stockhunter ingest ${{ inputs.what || 'all' }} || echo "::warning::ingestion partielle (quota atteint ou erreurs, voir le log)"
 
+      - name: Univers large (séances du marché US manquantes, max 4 appels)
+        run: stockhunter market sync --max-calls 4 || echo "::warning::univers large non à jour (voir le log)"
+
       - name: Contrôles qualité
         run: stockhunter quality || echo "::warning::anomalies critiques détectées"
 
@@ -77,6 +82,8 @@ jobs:
             stockhunter status
             echo
             stockhunter prices SPY -n 5 || true
+            echo
+            stockhunter market status || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           stockhunter status

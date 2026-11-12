@@ -340,3 +340,37 @@ class ValidationRun(Base):
     params_json: Mapped[str] = mapped_column(Text)
     report_json: Mapped[str] = mapped_column(Text)
     verdicts_json: Mapped[str] = mapped_column(Text)
+
+
+# =========================================================================== Univers large (Massive)
+class MarketTicker(Base):
+    """Référentiel de tous les titres US (actifs ET retirés de la cote : pas de biais du survivant)."""
+
+    __tablename__ = "market_tickers"
+    __table_args__ = (UniqueConstraint("ticker_key", name="uq_market_ticker"),
+                      Index("ix_market_ticker_symbol", "ticker"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker_key: Mapped[str] = mapped_column(String(80))  # ticker|composite_figi (un ticker peut être réattribué)
+    ticker: Mapped[str] = mapped_column(String(20))
+    name: Mapped[str | None] = mapped_column(String(255))
+    type: Mapped[str | None] = mapped_column(String(20))           # CS, ETF, ADRC, PFD, WARRANT...
+    primary_exchange: Mapped[str | None] = mapped_column(String(10))
+    active: Mapped[bool] = mapped_column(Boolean)
+    cik: Mapped[str | None] = mapped_column(String(10))
+    composite_figi: Mapped[str | None] = mapped_column(String(20))
+    delisted_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MarketSplit(Base):
+    __tablename__ = "market_splits"
+    __table_args__ = (UniqueConstraint("ticker", "execution_date", name="uq_market_split"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(20), index=True)
+    execution_date: Mapped[date] = mapped_column(Date)
+    split_from: Mapped[float] = mapped_column(Float)
+    split_to: Mapped[float] = mapped_column(Float)
+    adjustment_type: Mapped[str | None] = mapped_column(String(30))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
