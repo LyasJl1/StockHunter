@@ -382,6 +382,11 @@ def cmd_analyse(settings, engine, args) -> int:
     return 0
 
 
+def cmd_pipeline(settings, engine, args) -> int:
+    from stockhunter import pipeline
+    return pipeline.run(engine)
+
+
 def cmd_lab(settings, engine, args) -> int:
     """Laboratoire de recherche v3 : programme pré-enregistré sur l'univers large, registre des expériences."""
     import json as _json
@@ -429,6 +434,8 @@ def add_parsers(sub) -> dict:
     an.add_argument("symbol")
     an.add_argument("--as-of", help="date AAAA-MM-JJ (point-in-time), défaut : dernier scan")
     an.add_argument("--out", help="fichier Markdown")
+    pl = sub.add_parser("pipeline", help="chaîne nocturne complète (collecte → rapports), échecs critiques non masqués")
+    pl.add_argument("name", choices=["nightly"])
     lb = sub.add_parser("lab", help="laboratoire de recherche v3 (programme pré-enregistré, registre)")
     lb.add_argument("action", choices=["run", "registry"])
     lb.add_argument("--end", help="dernière séance utilisée AAAA-MM-JJ (défaut : toutes)")
@@ -465,6 +472,6 @@ def add_parsers(sub) -> dict:
     cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
     cp.add_argument("action", choices=["copy-to"])
     cp.add_argument("target", help="URL de la base cible, déjà migrée et vide")
-    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "validate": cmd_validate, "market": cmd_market,
+    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "pipeline": cmd_pipeline, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
             "dashboard": cmd_dashboard, "db": cmd_db}

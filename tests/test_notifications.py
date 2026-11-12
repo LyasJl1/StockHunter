@@ -147,3 +147,27 @@ def test_web_worker_answers_commands_quickly(engine, settings, monkeypatch):
             break
         _t.sleep(0.05)
     assert sent and "État du système" in sent[0]
+
+
+def test_single_telegram_reader_lease(engine, settings):
+    """Un seul lecteur getUpdates à la fois (sinon HTTP 409) : bail exclusif, repris seulement à expiration."""
+    from datetime import datetime, timedelta, timezone
+    from stockhunter.notifications import engine as ne
+    t0 = datetime(2026, 11, 12, 20, 0, tzinfo=timezone.utc)
+    assert ne.acquire_reader(engine, "worker-a", 90, t0)
+    assert ne.acquire_reader(engine, "worker-a", 90, t0 + timedelta(seconds=30))          # renouvellement
+    assert not ne.acquire_reader(engine, "batch", 60, t0 + timedelta(seconds=60))         # job planifié : s'abstient
+    assert not ne.acquire_reader(engine, "worker-b", 90, t0 + timedelta(seconds=100))     # nouveau conteneur : attend
+    assert ne.acquire_reader(engine, "worker-b", 90, t0 + timedelta(seconds=121))         # bail expiré : reprise
+    assert not ne.acquire_reader(engine, "worker-a", 90, t0 + timedelta(seconds=125))
+
+    class Boom:
+        chat_id = "1"
+        def updates(self, offset):
+            raise AssertionError("getUpdates ne doit pas être appelé sans le bail")
+    with session_scope(engine) as s:
+        from stockhunter.db.models import KeyValue
+        import json
+        s.get(KeyValue, ne.READER_KEY).value = json.dumps(
+            {"owner": "worker-b", "until": (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()})
+    assert ne.process_commands(engine, Boom()) == 0
