@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:   # bouton « Run workflow » pour vérifier les API à la demande
 
 jobs:
   tests:
@@ -24,7 +25,8 @@ jobs:
   live-sources:
     # Vérification réelle des API, uniquement si les secrets sont configurés dans le dépôt
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
+    environment: Variables   # les secrets SH_* sont des secrets de cet environnement
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,3 +38,4 @@ jobs:
           SH_SEC_USER_AGENT: ${{ secrets.SH_SEC_USER_AGENT }}
           SH_TIINGO_API_KEY: ${{ secrets.SH_TIINGO_API_KEY }}
           SH_FRED_API_KEY: ${{ secrets.SH_FRED_API_KEY }}
+          SH_FINNHUB_API_KEY: ${{ secrets.SH_FINNHUB_API_KEY }}

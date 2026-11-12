@@ -8,7 +8,7 @@ from datetime import date, timedelta
 import pytest
 
 from stockhunter.config import Settings
-from stockhunter.data.providers import FredProvider, SecEdgarProvider, TiingoProvider
+from stockhunter.data.providers import FinnhubProvider, FredProvider, SecEdgarProvider, TiingoProvider
 from stockhunter.db.models import Base
 from stockhunter.db.session import get_engine
 
@@ -44,3 +44,11 @@ def test_fred_live(live):
     if not s.fred_api_key:
         pytest.skip("SH_FRED_API_KEY absent")
     assert FredProvider(s, e).fetch_observations("DGS10", date.today() - timedelta(days=30))
+
+
+def test_finnhub_live(live):
+    s, e = live
+    if not s.finnhub_api_key:
+        pytest.skip("SH_FINNHUB_API_KEY absent")
+    events = FinnhubProvider(s, e).fetch_earnings_calendar(date.today(), date.today() + timedelta(days=7))
+    assert isinstance(events, list)
