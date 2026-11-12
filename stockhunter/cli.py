@@ -89,7 +89,8 @@ def cmd_ingest(settings: Settings, engine, args) -> int:
             elif t == "fundamentals":
                 p = SecEdgarProvider(settings, engine)
                 run = run_job(engine, "ingest_fundamentals",
-                              lambda ctx: ingestion.ingest_fundamentals(engine, ctx, p, symbols))
+                              lambda ctx: ingestion.ingest_fundamentals(engine, ctx, p, symbols,
+                                                                        settings.price_history_years))
             elif t == "macro":
                 p = FredProvider(settings, engine)
                 run = run_job(engine, "ingest_macro",

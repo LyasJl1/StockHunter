@@ -83,7 +83,23 @@ def FIXTURE_submissions(cik: int) -> dict:
             "form": ["8-K", "10-Q", "SD"],
             "primaryDocument": ["ev8k.htm", "q2.htm", "sd.htm"],
             "items": ["2.02,9.01", "", ""],
-        }},
+        },
+            "files": [{"name": f"CIK{cik:010d}-submissions-001.json", "filingCount": 2,
+                       "filingFrom": "2018-01-01", "filingTo": "2019-12-31"},
+                      {"name": f"CIK{cik:010d}-submissions-002.json", "filingCount": 1,
+                       "filingFrom": "2001-01-01", "filingTo": "2005-12-31"}]},
+    }
+
+
+def FIXTURE_submissions_archive(cik: int) -> dict:
+    """Page d'archive SEC (format colonnaire, sans enveloppe)."""
+    return {
+        "accessionNumber": [f"{cik:010d}-19-000001", f"{cik:010d}-19-000002"],
+        "filingDate": ["2019-01-30", "2019-02-01"],
+        "reportDate": ["2019-01-30", ""],
+        "form": ["8-K", "4"],
+        "primaryDocument": ["old8k.htm", "f4.xml"],
+        "items": ["2.02", ""],
     }
 
 

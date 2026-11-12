@@ -167,7 +167,8 @@ def ingest_prices(engine: Engine, ctx: JobContext, tiingo: TiingoProvider, histo
 
 # --------------------------------------------------------------------------- fondamentaux SEC
 def ingest_fundamentals(engine: Engine, ctx: JobContext, sec: SecEdgarProvider,
-                        symbols: list[str] | None = None) -> None:
+                        symbols: list[str] | None = None, history_years: int = 10,
+                        today: date | None = None) -> None:
     sources = ensure_sources(engine)
     src_id = sources[SecEdgarProvider.NAME]
     for inst in _instruments(engine, symbols, asset_type="stock"):
@@ -176,7 +177,8 @@ def ingest_fundamentals(engine: Engine, ctx: JobContext, sec: SecEdgarProvider,
             continue
         try:
             facts = sec.fetch_companyfacts(inst.cik, inst.symbol)
-            subs = sec.fetch_submissions(inst.cik, inst.symbol)
+            since = (today or date.today()) - timedelta(days=365 * history_years)
+            subs = sec.fetch_submissions(inst.cik, inst.symbol, history_since=since)
             with session_scope(engine) as s:
                 upsert(s, FundamentalFact,
                        [{**f, "instrument_id": inst.id, "source_id": src_id} for f in facts],

@@ -17,6 +17,7 @@ from tests.fixtures import (
     FIXTURE_companyfacts,
     FIXTURE_fred_obs,
     FIXTURE_submissions,
+    FIXTURE_submissions_archive,
     FIXTURE_tiingo_bars,
 )
 
@@ -116,13 +117,18 @@ def test_fundamentals_and_filings_dedup(engine, settings):
         side_effect=lambda req, c: httpx.Response(200, json=FIXTURE_companyfacts(int(c))))
     respx.get(url__regex=r"https://data\.sec\.gov/submissions/CIK(?P<c>\d+)\.json").mock(
         side_effect=lambda req, c: httpx.Response(200, json=FIXTURE_submissions(int(c))))
+    archive = respx.get(url__regex=r"https://data\.sec\.gov/submissions/CIK(?P<c>\d+)-submissions-(?P<p>\d+)\.json").mock(
+        side_effect=lambda req, c, p: httpx.Response(200, json=FIXTURE_submissions_archive(int(c))))
     sec = SecEdgarProvider(settings, engine, **nosleep)
     ctx = JobContext(run_id=0)
-    ingestion.ingest_fundamentals(engine, ctx, sec)
+    ingestion.ingest_fundamentals(engine, ctx, sec, today=TODAY)
     assert ctx.ok == 2 and ctx.failed == 0  # l'ETF est ignoré
+    # page d'archive 001 (2018-2019) chargée, page 002 (2001-2005, avant la période utile) ignorée
+    assert archive.call_count == 2 and all("-001.json" in str(c.request.url) for c in archive.calls)
+    assert count(engine, Filing, Filing.primary_doc == "old8k.htm") == 2
     n_facts, n_filings = count(engine, FundamentalFact), count(engine, Filing)
     assert n_facts == 2 * 3  # Revenues (dédupliqué), Assets, SharesOutstanding
-    ingestion.ingest_fundamentals(engine, JobContext(run_id=0), sec)
+    ingestion.ingest_fundamentals(engine, JobContext(run_id=0), sec, today=TODAY)
     assert count(engine, FundamentalFact) == n_facts and count(engine, Filing) == n_filings
     with session_scope(engine) as s:
         inst = s.scalar(select(Instrument).where(Instrument.symbol == "ZZTA"))

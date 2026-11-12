@@ -11,7 +11,7 @@ Sources retenues (plans gratuits, vérifiés le 2026-11-12 — à revérifier) :
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -188,33 +188,48 @@ class SecSubmissions:
     sic: str | None
     sic_description: str | None
     filings: list[dict[str, Any]]
+    archive_pages: list[dict[str, Any]] = field(default_factory=list)
+    cik_int: int = 0
 
 
-def parse_sec_submissions(payload: dict[str, Any], forms: set[str] = SEC_FORMS) -> SecSubmissions:
-    cik_int = int(payload["cik"])
-    recent = payload.get("filings", {}).get("recent", {})
-    n = len(recent.get("accessionNumber", []))
+def parse_sec_filing_columns(cols: dict[str, Any], cik_int: int, forms: set[str] = SEC_FORMS) -> list[dict[str, Any]]:
+    """Tableau colonnaire de dépôts (bloc `recent` ou page d'archive `CIK…-submissions-NNN.json`)."""
+    n = len(cols.get("accessionNumber", []))
     filings = []
     for i in range(n):
-        form = recent["form"][i]
+        form = cols["form"][i]
         if form not in forms:
             continue
-        accn = recent["accessionNumber"][i]
-        doc = (recent.get("primaryDocument") or [None] * n)[i]
+        accn = cols["accessionNumber"][i]
+        doc = (cols.get("primaryDocument") or [None] * n)[i]
         url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{accn.replace('-', '')}/" + (doc or "")
         filings.append(
             {
                 "accession": accn,
                 "form": form,
-                "filed_date": _d(recent["filingDate"][i]),
-                "report_date": _d((recent.get("reportDate") or [None] * n)[i]),
-                "items": ((recent.get("items") or [None] * n)[i] or None),
+                "filed_date": _d(cols["filingDate"][i]),
+                "report_date": _d((cols.get("reportDate") or [None] * n)[i]),
+                "items": ((cols.get("items") or [None] * n)[i] or None),
                 "primary_doc": doc,
                 "url": url,
             }
         )
-    return SecSubmissions(payload.get("name"), payload.get("sic") or None,
+    return filings
+
+
+def parse_sec_submissions(payload: dict[str, Any], forms: set[str] = SEC_FORMS) -> SecSubmissions:
+    cik_int = int(payload["cik"])
+    filings = parse_sec_filing_columns(payload.get("filings", {}).get("recent", {}), cik_int, forms)
+    subs = SecSubmissions(payload.get("name"), payload.get("sic") or None,
                           payload.get("sicDescription") or None, filings)
+    # Pages d'archive : le bloc `recent` ne contient que ~1000 dépôts (quelques mois seulement pour les
+    # sociétés qui déposent beaucoup de Form 4) ; les plus anciens sont dans des fichiers séparés.
+    subs.archive_pages = [
+        {"name": f["name"], "from": _d(f.get("filingFrom")), "to": _d(f.get("filingTo"))}
+        for f in payload.get("filings", {}).get("files", []) or [] if f.get("name")
+    ]
+    subs.cik_int = cik_int
+    return subs
 
 
 def sic_to_sector(sic: str | None) -> str | None:
@@ -278,10 +293,18 @@ class SecEdgarProvider:
                                      cache_ttl=timedelta(hours=20))
         return parse_sec_companyfacts(payload)
 
-    def fetch_submissions(self, cik: str, symbol: str | None = None) -> SecSubmissions:
+    def fetch_submissions(self, cik: str, symbol: str | None = None, history_since: date | None = None) -> SecSubmissions:
         payload = self.data.get_json(f"/submissions/CIK{cik10(cik)}.json", symbol=symbol,
                                      cache_ttl=timedelta(hours=6))
-        return parse_sec_submissions(payload)
+        subs = parse_sec_submissions(payload)
+        if history_since:
+            for page in subs.archive_pages:
+                if page["to"] and page["to"] < history_since:
+                    continue  # page entièrement antérieure à la période utile
+                older = self.data.get_json(f"/submissions/{page['name']}", symbol=symbol,
+                                           cache_ttl=timedelta(days=30))  # pages d'archive : quasi immuables
+                subs.filings.extend(parse_sec_filing_columns(older, subs.cik_int))
+        return subs
 
 
 # =========================================================================== FRED
