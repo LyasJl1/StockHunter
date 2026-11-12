@@ -21,12 +21,30 @@ def row_counts(engine: Engine) -> dict[str, int]:
         return {t.name: c.scalar(select(func.count()).select_from(t)) for t in Base.metadata.sorted_tables}
 
 
+# État technique que le serveur web écrit dès son démarrage (curseur des commandes Telegram, réponse à
+# une commande). Ce ne sont pas des données de marché : s'il n'y a QUE cela dans la cible, on le remplace
+# par l'état de la base source. Toute autre donnée présente bloque la copie.
+RUNTIME_TABLES = {"kv_store", "notifications"}
+
+
+def _counts(conn) -> dict[str, int]:
+    return {t.name: conn.scalar(select(func.count()).select_from(t)) for t in Base.metadata.sorted_tables}
+
+
 def copy_database(src: Engine, dst: Engine, progress=print) -> dict[str, int]:
-    existing = {k: v for k, v in row_counts(dst).items() if v}
-    if existing:
-        raise RuntimeError(f"la base cible n'est pas vide ({existing}) : copie refusée")
     copied = {}
     with src.connect() as s, dst.begin() as d:
+        if dst.dialect.name == "postgresql":
+            # Le serveur web tourne pendant la copie : ses écritures attendent la fin de la transaction.
+            d.execute(text(f"LOCK TABLE {', '.join(sorted(RUNTIME_TABLES))} IN ACCESS EXCLUSIVE MODE"))
+        existing = {k: v for k, v in _counts(d).items() if v}
+        blocking = {k: v for k, v in existing.items() if k not in RUNTIME_TABLES}
+        if blocking:
+            raise RuntimeError(f"la base cible n'est pas vide ({existing}) : copie refusée")
+        for name in sorted(existing):
+            table = Base.metadata.tables[name]
+            d.execute(table.delete())
+            progress(f"  état technique du serveur remplacé : {name} ({existing[name]} ligne(s))")
         for table in Base.metadata.sorted_tables:
             n, batch = 0, []
             for row in s.execute(select(table)).mappings():
