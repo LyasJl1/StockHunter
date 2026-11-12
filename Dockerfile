@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -e ".[postgres]"
 RUN useradd -m app && mkdir -p /app/var && chown -R app /app
 USER app
 
-# Conteneur « job » : exécute une commande puis s'arrête (pas de service 24h/24).
-# Railway Cron : définir la commande par service, ex. `stockhunter ingest all`.
-ENTRYPOINT ["stockhunter"]
-CMD ["status"]
+# Railway : la commande de démarrage du service web est dans railway.json
+# (migrations puis dashboard + lecteur de commandes Telegram). Un seul processus, peu de mémoire.
+EXPOSE 8000
+CMD ["sh", "-c", "stockhunter init-db && stockhunter dashboard serve --host 0.0.0.0 --port ${PORT:-8000} --telegram-worker"]

@@ -39,7 +39,8 @@ class TelegramClient:
     def __init__(self, token: str, chat_id: str, transport: httpx.BaseTransport | None = None,
                  sleep: Callable[[float], None] = time.sleep, max_retries: int = 3):
         self._token, self.chat_id, self.sleep, self.max_retries = token, str(chat_id), sleep, max_retries
-        self._http = httpx.Client(base_url=f"https://api.telegram.org/bot{token}", timeout=30, transport=transport)
+        self.poll_timeout = 0   # 0 = lecture ponctuelle (workflows) ; > 0 = interrogation longue (service web)
+        self._http = httpx.Client(base_url=f"https://api.telegram.org/bot{token}", timeout=60, transport=transport)
 
     def _redact(self, s: str) -> str:
         return s.replace(self._token, "***").replace(self.chat_id, "<chat>")
@@ -71,4 +72,5 @@ class TelegramClient:
                                        "disable_web_page_preview": True})
 
     def updates(self, offset: int | None) -> list[dict]:
-        return self._call("getUpdates", {"offset": offset, "timeout": 0, "allowed_updates": ["message"]}) or []
+        return self._call("getUpdates", {"offset": offset, "timeout": self.poll_timeout,
+                                         "allowed_updates": ["message"]}) or []

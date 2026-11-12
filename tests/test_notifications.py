@@ -119,3 +119,31 @@ def test_report_tells_the_truth_about_plans_and_validation(engine):
         sv.name, sv.version = "stockhunter-multifactor", "2.0.0"
     text, _ = build_report(engine, "morning")
     assert "pas encore créés" in text and "AUCUNE STRATÉGIE VALIDÉE" in text and "non testées" not in text
+
+
+def test_web_worker_answers_commands_quickly(engine, settings, monkeypatch):
+    import time as _t
+
+    from stockhunter.notifications import worker
+    setup(engine)
+    sent = []
+
+    class Fake:
+        chat_id, poll_timeout = CHAT, 0
+        def __init__(self):
+            self.served = False
+        def updates(self, offset):
+            if self.served:
+                return []
+            self.served = True
+            return [{"update_id": 99, "message": {"chat": {"id": int(CHAT)}, "text": "/status"}}]
+        def send(self, text):
+            sent.append(text)
+
+    monkeypatch.setattr(ne, "client_from", lambda s: Fake())
+    worker.start(engine, settings, interval_s=0.05)
+    for _ in range(100):
+        if sent:
+            break
+        _t.sleep(0.05)
+    assert sent and "État du système" in sent[0]

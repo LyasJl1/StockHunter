@@ -11,7 +11,17 @@ from sqlalchemy.orm import Session, sessionmaker
 _engines: dict[str, Engine] = {}
 
 
+def normalize_url(url: str) -> str:
+    """Railway et la plupart des hébergeurs fournissent « postgres:// » ou « postgresql:// » : on impose le
+    pilote psycopg 3 installé avec l'extra [postgres]."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
 def get_engine(url: str) -> Engine:
+    url = normalize_url(url)
     if url not in _engines:
         if url.startswith("sqlite:///") and not url.endswith(":memory:"):
             Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)

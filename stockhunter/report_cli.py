@@ -343,7 +343,25 @@ def cmd_dashboard(settings, engine, args) -> int:
 
     from stockhunter.dashboard.app import create_app
     app = create_app(engine, settings, secure_cookies=not args.insecure_cookies)
+    if args.telegram_worker:
+        from stockhunter.notifications import worker
+        worker.start(engine, settings)
     uvicorn.run(app, host=args.host, port=args.port, proxy_headers=True, forwarded_allow_ips="*")
+    return 0
+
+
+def cmd_db(settings, engine, args) -> int:
+    from stockhunter.db.copy import copy_database
+    from stockhunter.db.session import get_engine
+    target = get_engine(args.target)
+    print(f"Copie de {engine.url.render_as_string(hide_password=True)} vers "
+          f"{target.url.render_as_string(hide_password=True)}")
+    try:
+        copied = copy_database(engine, target)
+    except RuntimeError as exc:
+        print(f"ÉCHEC : {exc}")
+        return 1
+    print(f"Copie vérifiée : {sum(copied.values())} lignes dans {sum(1 for v in copied.values() if v)} tables.")
     return 0
 
 
@@ -386,6 +404,10 @@ def add_parsers(sub) -> dict:
     db.add_argument("--host", default="127.0.0.1")
     db.add_argument("--port", type=int, default=8000)
     db.add_argument("--insecure-cookies", action="store_true", help="HTTP local uniquement (pas de HTTPS)")
+    db.add_argument("--telegram-worker", action="store_true", help="répondre aux commandes Telegram en continu")
+    cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
+    cp.add_argument("action", choices=["copy-to"])
+    cp.add_argument("target", help="URL de la base cible, déjà migrée et vide")
     return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
-            "dashboard": cmd_dashboard}
+            "dashboard": cmd_dashboard, "db": cmd_db}

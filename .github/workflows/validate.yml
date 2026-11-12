@@ -16,15 +16,17 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    environment: Variables
     timeout-minutes: 45
     env:
-      SH_DATABASE_URL: sqlite:///var/stockhunter.db
+      # Base de production (PostgreSQL Railway) si le secret existe, sinon SQLite du cache.
+      SH_DATABASE_URL: ${{ secrets.SH_DATABASE_URL || 'sqlite:///var/stockhunter.db' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -e .
+      - run: pip install -e ".[postgres]"
 
       - name: Restaurer la base
         uses: actions/cache/restore@v5

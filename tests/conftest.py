@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 from pydantic import SecretStr
 
@@ -32,9 +34,17 @@ def settings(tmp_path):
 
 @pytest.fixture
 def engine(settings):
+    """SQLite par défaut ; SH_TEST_DATABASE_URL=postgresql://... pour exécuter la suite sur PostgreSQL."""
+    url = os.environ.get("SH_TEST_DATABASE_URL")
+    if url:
+        settings.database_url = url
     eng = get_engine(settings.database_url)
+    if url:
+        Base.metadata.drop_all(eng)
     Base.metadata.create_all(eng)
-    return eng
+    yield eng
+    if url:
+        eng.dispose()
 
 
 @pytest.fixture

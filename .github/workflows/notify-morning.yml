@@ -22,7 +22,8 @@ jobs:
     environment: Variables
     timeout-minutes: 15
     env:
-      SH_DATABASE_URL: sqlite:///var/stockhunter.db
+      # Base de production (PostgreSQL Railway) si le secret existe, sinon SQLite du cache.
+      SH_DATABASE_URL: ${{ secrets.SH_DATABASE_URL || 'sqlite:///var/stockhunter.db' }}
       SH_MARKET_DIR: var/market
       SH_TELEGRAM_BOT_TOKEN: ${{ secrets.SH_TELEGRAM_BOT_TOKEN }}
       SH_TELEGRAM_CHAT_ID: ${{ secrets.SH_TELEGRAM_CHAT_ID }}
@@ -31,7 +32,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -e .
+      - run: pip install -e ".[postgres]"
 
       - name: Restaurer la base
         uses: actions/cache/restore@v5

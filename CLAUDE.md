@@ -67,7 +67,9 @@ stockhunter paper run|status        # paper trading : plans des signaux READY, s
 stockhunter forward record|report   # test prospectif des facteurs pré-enregistrés (depuis le 13/11/2026)
 stockhunter notify evening|morning [--preview] [--force]   # rapport quotidien + alertes Telegram
 stockhunter dashboard hash-password # génère SH_DASHBOARD_PASSWORD_HASH et SH_DASHBOARD_SECRET
-stockhunter dashboard serve [--port 8000] [--insecure-cookies]   # interface web (HTTPS en production)
+stockhunter dashboard serve [--port 8000] [--insecure-cookies] [--telegram-worker]   # interface web
+stockhunter db copy-to URL          # copie vérifiée vers une base vide (migration PostgreSQL)
+SH_TEST_DATABASE_URL=postgresql://... pytest -m "not live"   # suite complète sur PostgreSQL
 pytest -m "not live"                # tests hors réseau
 pytest -m live                      # tests réels (clés requises)
 ```
@@ -91,7 +93,8 @@ pytest -m live                      # tests réels (clés requises)
 Skill `/data-quality` pour les données ; agent `data-engineer` pour toute modification de l'ingestion.
 Avant de dire qu'un service « fonctionne » : `stockhunter verify-sources` ou `pytest -m live` doivent l'avoir prouvé.
 
-## Déploiement (cible : Railway, plan à valider par Ilias)
+## Déploiement : voir docs/deploiement.md (Railway plan gratuit validé par Ilias le 12/11/2026)
+Ancienne note :
 Image Docker = conteneur « job » (pas de service 24h/24). PostgreSQL en production via `SH_DATABASE_URL`.
 Jobs planifiés prévus (heure UTC, à affiner en phase 7) : ingestion EOD après publication des clôtures US,
 qualité juste après, macro 1×/jour, fondamentaux/dépôts SEC 1×/jour.

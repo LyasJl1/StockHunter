@@ -1,0 +1,44 @@
+name: Migration vers PostgreSQL
+
+# Copie UNIQUE de la base SQLite (cache GitHub) vers PostgreSQL Railway.
+# Prérequis : secret SH_POSTGRES_URL (DATABASE_PUBLIC_URL de Railway) dans l'environnement « Variables ».
+# La cible doit être vide : une 2e exécution est refusée sans rien modifier.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ingestion
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[postgres]"
+
+      - name: Restaurer la base SQLite
+        uses: actions/cache/restore@v5
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+          restore-keys: stockhunter-db-
+
+      - name: Schéma à jour (source et cible)
+        env:
+          TARGET: ${{ secrets.SH_POSTGRES_URL }}
+        run: |
+          test -n "$TARGET" || { echo "::error::secret SH_POSTGRES_URL manquant"; exit 1; }
+          SH_DATABASE_URL=sqlite:///var/stockhunter.db stockhunter init-db
+          SH_DATABASE_URL="$TARGET" stockhunter init-db
+
+      - name: Copie et contrôle
+        env:
+          TARGET: ${{ secrets.SH_POSTGRES_URL }}
+        run: |
+          SH_DATABASE_URL=sqlite:///var/stockhunter.db stockhunter db copy-to "$TARGET" | tee -a "$GITHUB_STEP_SUMMARY"
