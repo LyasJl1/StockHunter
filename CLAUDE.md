@@ -46,7 +46,7 @@ Méthode détaillée : `docs/scoring.md`. Protocole de backtest et résultats : 
   dashboard/           FastAPI + Jinja + HTMX + Chart.js (scripts embarqués), auth scrypt, CSRF, CSP
   catalysts/           rubriques 8-K et titres d'articles classés par règles ; catalyseurs récents (rapport, alertes)
   analysis/synthesis.py synthèse écrite et sourcée par action (règles, sans LLM), famille E informative
-Phases 6 (actualités et synthèses) et 7 (déploiement Railway) livrées ; reste l'audit final (8). Ancien plan : `risk/ portfolio/ notifications/ reports/ dashboard/`.
+Phases 1 à 8 livrées (audit : docs/reports/2026-11-12-audit-final.md). Ancien plan : `risk/ portfolio/ notifications/ reports/ dashboard/`.
 Cycle d'une stratégie : RESEARCH → BACKTEST → OUT-OF-SAMPLE → PAPER → PROMOTED.
 
 ## Commandes
@@ -93,7 +93,9 @@ pytest -m live                      # tests réels (clés requises)
 - Français pour la documentation et les messages utilisateur.
 
 ## Procédure d'audit
-Skill `/data-quality` pour les données ; agent `data-engineer` pour toute modification de l'ingestion.
+Skills : `/data-quality` (données), `/strategy-validation` (toute règle de scoring ou stratégie), `/stock-analysis`
+(analyse d'une action). Agents : `data-engineer` (ingestion), `quant-validator` (relecture indépendante d'un
+backtest), `security-auditor` (avant déploiement). Rapport d'audit : `docs/reports/2026-11-12-audit-final.md`.
 Avant de dire qu'un service « fonctionne » : `stockhunter verify-sources` ou `pytest -m live` doivent l'avoir prouvé.
 
 ## Déploiement : voir docs/deploiement.md (Railway plan gratuit validé par Ilias le 12/11/2026)
