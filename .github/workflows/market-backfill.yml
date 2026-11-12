@@ -38,7 +38,22 @@ jobs:
 
       - name: Chargement (arrêt propre à 160 min, reprise au prochain lancement)
         run: |
-          timeout 160m stockhunter market sync --reference || echo "::warning::chargement incomplet - relancer ce workflow"
+          set -o pipefail
+          timeout 160m stockhunter market sync --reference 2>&1 | tee sync.log || echo "::warning::chargement incomplet - relancer ce workflow"
+
+      - name: Diagnostic
+        if: always()
+        run: |
+          {
+            echo '### Journal du chargement (fin)'
+            echo '```'
+            tail -n 40 sync.log 2>/dev/null || echo "pas de journal"
+            echo '```'
+            echo '### Configuration'
+            echo '```'
+            stockhunter status | sed -n '/Sources/,/^$/p'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: État
         if: always()
