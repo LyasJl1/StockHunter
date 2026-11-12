@@ -246,8 +246,36 @@ def answer(engine: Engine, cmd: str) -> str:
     return HELP
 
 
-def process_commands(engine: Engine, client: TelegramClient | None) -> int:
-    if client is None:
+READER_KEY = "telegram_reader"
+
+
+def acquire_reader(engine: Engine, owner: str, ttl_s: int, now: datetime | None = None) -> bool:
+    """Bail exclusif sur la lecture des commandes Telegram (une seule lecture getUpdates à la fois, sinon l'API
+    répond 409). Le serveur web le renouvelle en continu ; un job planifié ne lit que si le bail est libre ou
+    expiré (serveur arrêté). Prise atomique par comparaison-échange sur la ligne kv_store."""
+    from sqlalchemy import update
+    from sqlalchemy.exc import IntegrityError
+
+    now = now or datetime.now(timezone.utc)
+    new = json.dumps({"owner": owner, "until": (now + timedelta(seconds=ttl_s)).isoformat()})
+    try:
+        with session_scope(engine) as s:
+            kv = s.get(KeyValue, READER_KEY)
+            if kv is None:
+                s.add(KeyValue(key=READER_KEY, value=new))
+                return True
+            cur = json.loads(kv.value)
+            if cur.get("owner") != owner and datetime.fromisoformat(cur["until"]) > now:
+                return False
+            done = s.execute(update(KeyValue).where(KeyValue.key == READER_KEY, KeyValue.value == kv.value)
+                             .values(value=new)).rowcount
+            return done == 1
+    except IntegrityError:
+        return False
+
+
+def process_commands(engine: Engine, client: TelegramClient | None, owner: str = "batch", ttl_s: int = 60) -> int:
+    if client is None or not acquire_reader(engine, owner, ttl_s):
         return 0
     with session_scope(engine) as s:
         kv = s.get(KeyValue, "telegram_offset")

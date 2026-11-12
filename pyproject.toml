@@ -21,6 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.1"]
 dev = ["pytest>=8", "respx>=0.21"]
+research = ["scikit-learn>=1.4"]   # gradient boosting du laboratoire (optionnel)
 
 [project.scripts]
 stockhunter = "stockhunter.cli:main"
@@ -33,7 +34,7 @@ build-backend = "setuptools.build_meta"
 include = ["stockhunter*"]
 
 [tool.setuptools.package-data]
-stockhunter = ["universe/*.csv", "validation/*.json", "dashboard/templates/*.html", "dashboard/static/*"]
+stockhunter = ["universe/*.csv", "validation/*.json", "lab/*.json", "dashboard/templates/*.html", "dashboard/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

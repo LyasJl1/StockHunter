@@ -1,0 +1,64 @@
+name: Laboratoire v3
+
+# Programme de recherche pré-enregistré (docs/research/2026-11-12-preenregistrement-v3.md) sur les données de
+# marché du cache. LECTURE SEULE : aucune clé API, aucune écriture en base de production, cache non modifié.
+# Déclenchement : manuel, ou dépôt d'une demande d'exécution dans docs/research/runs/ sur la branche de travail.
+on:
+  workflow_dispatch:
+  push:
+    branches: [stockhunter-v3]
+    paths: ["docs/research/runs/**"]
+
+concurrency:
+  group: lab
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SH_DATABASE_URL: sqlite:///var/stockhunter.db      # copie locale du cache (référentiel, splits) : jamais la production
+      SH_MARKET_DIR: var/market
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[research]"
+
+      - name: Restaurer les données de marché (lecture seule)
+        uses: actions/cache/restore@v5
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+          restore-keys: stockhunter-db-
+
+      - name: Programme v3
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[lab]')
+        run: |
+          ls var/market/daily | head -3
+          /usr/bin/time -v stockhunter lab run --end 2026-11-11 --out lab-report.md --json lab.json > /dev/null 2> time.log
+          grep -E "Maximum resident|Elapsed" time.log
+          cat lab-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Moteur de découverte — essai à blanc sur données réelles (copie locale, rien n'est publié ni écrit en production)
+        if: contains(github.event.head_commit.message, '[discover]')
+        run: |
+          stockhunter init-db > /dev/null
+          /usr/bin/time -v stockhunter discover run 2> time-discover.log
+          grep -E "Maximum resident|Elapsed" time-discover.log
+          stockhunter discover run | tail -3
+          stockhunter forward record | head -3
+
+      - name: Résultats (métriques uniquement, aucune donnée de marché)
+        if: always() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[lab]'))
+        run: |
+          tail -5 time.log || true
+          echo "===LAB-JSON-BEGIN==="
+          cat lab.json || true
+          echo
+          echo "===LAB-JSON-END==="
