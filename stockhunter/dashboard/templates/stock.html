@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% macro srcs(ln) %}{% if ln.sources %} <span class="sub">[{% for x in ln.sources %}{% if x.url %}<a href="{{ x.url }}" target="_blank" rel="noopener">{{ x.label }}</a>{% else %}{{ x.label }}{% endif %}{% if x.when %}, {{ x.when }}{% endif %}{{ ' ; ' if not loop.last }}{% endfor %}]</span>{% endif %}{% endmacro %}
 {% set i = d.inst %}{% set s = d.score %}
 <p><a href="/opportunities">← Opportunités</a></p>
 <h1 style="margin:0">{{ i.symbol }} <span class="muted" style="font-weight:400">{{ i.name or '' }}</span></h1>
@@ -11,10 +12,16 @@
   <div class="card"><h2>Statut</h2><div class="kpi"><span class="pill {{ s.status }}" style="font-size:16px">{{ s.status }}</span></div><div class="sub">{{ s.reason }}</div></div>
   <div class="card"><h2>Plan</h2>{% if d.trades %}{% set t = d.trades[0].t %}<div class="kpi" style="font-size:20px">{{ t.status }}</div>
     <div class="sub">{% if t.status=='OPEN' %}entrée {{ t.entry_price|num }} · stop {{ t.stop|num }} · TP1 {{ t.tp1|num }} · TP2 {{ t.tp2|num }}{% else %}{{ d.trades[0].plan.zone_entree }}{% endif %}</div>
-    {% else %}<div class="kpi" style="font-size:20px">WAIT</div><div class="sub">Aucune entrée attractive selon les règles actuelles.</div>{% endif %}</div>
+    {% elif s.status == 'READY' %}<div class="kpi" style="font-size:20px">EN ATTENTE</div><div class="sub">Signal READY : le plan simulé est créé au prochain passage du paper trading (après la collecte du soir).</div>
+    {% else %}<div class="kpi" style="font-size:20px">WAIT</div><div class="sub">Aucune entrée selon les règles actuelles (statut {{ s.status }}).</div>{% endif %}</div>
 </div>
 {% endif %}
 <div class="card" style="margin-top:16px"><h2>Cours (clôtures) et moyennes 50 / 200 jours</h2><canvas id="px" height="90"></canvas></div>
+{% if syn %}<div class="card" style="margin-top:16px"><h2>Synthèse sourcée</h2>
+  {% for ln in syn.header %}<p style="margin:4px 0">{{ ln.text }}{{ srcs(ln) }}</p>{% endfor %}
+  {% for title, lines in syn.sections %}<details {{ 'open' if loop.index <= 3 }} style="margin-top:10px"><summary><b>{{ title }}</b> <span class="sub">({{ lines|length }})</span></summary>
+    <ul class="reasons">{% for ln in lines %}<li>{{ ln.text }}{{ srcs(ln) }}</li>{% endfor %}</ul></details>{% endfor %}
+  <p class="sub">Texte généré par règles à partir des données datées de la base (aucune IA générative, aucune donnée inventée). Le classement des événements indique leur nature, pas leur effet attendu.</p></div>{% endif %}
 {% if s %}
 <div class="grid g2" style="margin-top:16px">
   <div class="card"><h2>Pourquoi elle pourrait progresser</h2><ul class="reasons">{% for r in s.pos %}<li>{{ r }}</li>{% else %}<li class="muted">Aucun argument favorable identifié.</li>{% endfor %}</ul>
@@ -23,9 +30,10 @@
     {% for k, v in s.sub.items() %}<tr><td>{{ v.label }}<div class="sub">poids {{ (v.weight*100)|round|int }} % · couverture {{ (v.coverage*100)|round|int }} %</div></td>
       <td class="r"><b>{{ v.score|num(0) if v.score is not none else 'N/D' }}</b></td></tr>{% endfor %}</table></div>
   <div class="card"><h2>Stratégies (stade RESEARCH, non validées)</h2><table>
-    {% for k, v in s.strategies.items() %}<tr><td><b>{{ k }}</b> {{ v.label }}</td>
+    {% for k, v in s.strategies.items() %}{% if k == 'E' and syn %}<tr><td><b>E</b> {{ syn.family_e.label }}</td>
+      <td>{{ 'ACTIVE' if syn.family_e.active else 'inactive' }}<div class="sub">{{ syn.family_e.hits|join(' ; ') }}{{ ' · ' if syn.family_e.hits }}{{ syn.family_e.note }}</div></td></tr>{% else %}<tr><td><b>{{ k }}</b> {{ v.label }}</td>
       <td>{{ 'ACTIVE' if v.active else ('—' if not v.get('implemented', true) else 'inactive') }}
-      <div class="sub">{{ v.detail or '' }}{% if v.missing and not v.active %}{{ ' · ' if v.detail }}manque : {{ v.missing|join(', ') }}{% endif %}</div></td></tr>{% endfor %}</table></div>
+      <div class="sub">{{ v.detail or '' }}{% if v.missing and not v.active %}{{ ' · ' if v.detail }}manque : {{ v.missing|join(', ') }}{% endif %}</div></td></tr>{% endif %}{% endfor %}</table></div>
   <div class="card"><h2>Indicateurs</h2><table>
     {% for k, v in s.metrics.items() if v is not none %}<tr><td class="sub">{{ k }}</td><td class="r">{{ v|num(3) if v is number else v }}</td></tr>{% endfor %}</table></div>
 </div>
@@ -34,7 +42,7 @@
   <div class="card"><h2>Publications vérifiées (SEC EDGAR)</h2><table>
     {% for f in d.filings %}<tr><td>{{ f.date|d }}</td><td>{{ f.form }}{% if f['items'] and '2.02' in f['items'] %} · résultats{% endif %}</td><td><a href="{{ f.url }}" target="_blank" rel="noopener">document</a></td></tr>
     {% else %}<tr><td class="muted">Aucun dépôt enregistré.</td></tr>{% endfor %}</table>
-    <p class="sub">Analyse détaillée des actualités : phase 6.</p></div>
+    <p class="sub">Les catalyseurs classés (8-K et presse) sont dans la synthèse ci-dessus.</p></div>
   <div class="card"><h2>Historique des décisions</h2><table>
     {% for h in d.history %}<tr><td>{{ h.as_of|d }}</td><td>{{ h['from'] or '(nouveau)' }} → <span class="pill {{ h.to }}">{{ h.to }}</span><div class="sub">{{ h.reason }}</div></td></tr>
     {% else %}<tr><td class="muted">Aucun historique.</td></tr>{% endfor %}</table></div>

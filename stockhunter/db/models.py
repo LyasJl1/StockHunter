@@ -194,6 +194,33 @@ class MarketEvent(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class NewsItem(Base):
+    """Article de presse référencé (titre, éditeur, lien) — jamais le texte intégral.
+
+    `published_at` = date de publication donnée par la source ; `fetched_at` = date de notre collecte.
+    Une analyse au jour J n'utilise que les articles publiés avant la fin de J.
+    `category` est un classement par mots-clés (indicatif), pas une analyse de sentiment.
+    """
+
+    __tablename__ = "news_items"
+    __table_args__ = (
+        UniqueConstraint("source_id", "instrument_id", "external_id", name="uq_news_external"),
+        Index("ix_news_instr_pub", "instrument_id", "published_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"))
+    source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
+    external_id: Mapped[str] = mapped_column(String(64))
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    headline: Mapped[str] = mapped_column(String(500))
+    summary: Mapped[str | None] = mapped_column(Text)
+    publisher: Mapped[str | None] = mapped_column(String(100))
+    url: Mapped[str] = mapped_column(String(1000))
+    category: Mapped[str] = mapped_column(String(30))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ApiCall(Base):
     """Journal des appels API : sert au contrôle des quotas et à l'audit."""
 

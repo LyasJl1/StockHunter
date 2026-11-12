@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from pathlib import Path
 
 from sqlalchemy import func, select
 
@@ -365,6 +366,22 @@ def cmd_db(settings, engine, args) -> int:
     return 0
 
 
+def cmd_analyse(settings, engine, args) -> int:
+    from stockhunter.analysis.synthesis import build, to_markdown
+    as_of = date.fromisoformat(args.as_of) if args.as_of else None
+    syn = build(engine, args.symbol, as_of)
+    if syn is None:
+        print(f"{args.symbol.upper()} ne fait pas partie de l'univers suivi.")
+        return 1
+    text = to_markdown(syn)
+    if args.out:
+        Path(args.out).write_text(text)
+        print(f"Synthèse écrite dans {args.out}")
+    else:
+        print(text)
+    return 0
+
+
 def add_parsers(sub) -> dict:
     sc = sub.add_parser("scan", help="calcule et enregistre le classement")
     sc.add_argument("--as-of", help="date d'analyse AAAA-MM-JJ (séance clôturée), défaut : dernière séance")
@@ -377,6 +394,10 @@ def add_parsers(sub) -> dict:
     ex = sub.add_parser("explain", help="fiche explicative d'une action")
     ex.add_argument("symbol")
     ex.add_argument("--run", type=int)
+    an = sub.add_parser("analyse", help="synthèse écrite et sourcée d'une action (phase 6)")
+    an.add_argument("symbol")
+    an.add_argument("--as-of", help="date AAAA-MM-JJ (point-in-time), défaut : dernier scan")
+    an.add_argument("--out", help="fichier Markdown")
     va = sub.add_parser("validate", help="backtest du moteur de scoring réel (phase 3)")
     va.add_argument("--holdout", action="store_true", help="évalue aussi la période réservée (une fois, méthode figée)")
     va.add_argument("--allow-holdout-again", action="store_true")
@@ -408,6 +429,6 @@ def add_parsers(sub) -> dict:
     cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
     cp.add_argument("action", choices=["copy-to"])
     cp.add_argument("target", help="URL de la base cible, déjà migrée et vide")
-    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "validate": cmd_validate, "market": cmd_market,
+    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
             "dashboard": cmd_dashboard, "db": cmd_db}

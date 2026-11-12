@@ -12,7 +12,7 @@ Sources retenues (plans gratuits, vérifiés le 2026-11-12 — à revérifier) :
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -375,6 +375,25 @@ def parse_finnhub_earnings(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def parse_finnhub_news(payload: Any) -> list[dict[str, Any]]:
+    """/company-news -> articles (titre, éditeur, lien, date de publication UTC). Lignes incomplètes ignorées."""
+    out = []
+    for a in payload or []:
+        if not isinstance(a, dict):
+            continue
+        ts, headline, url = a.get("datetime"), (a.get("headline") or "").strip(), (a.get("url") or "").strip()
+        if not ts or not headline or not url.startswith(("http://", "https://")):
+            continue
+        try:
+            published = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+        except (TypeError, ValueError, OverflowError, OSError):
+            continue
+        out.append({"external_id": str(a.get("id") or url)[:64], "published_at": published,
+                    "headline": headline[:500], "summary": (a.get("summary") or "").strip()[:1000] or None,
+                    "publisher": (a.get("source") or "").strip()[:100] or None, "url": url[:1000]})
+    return out
+
+
 class FinnhubProvider:
     NAME = "finnhub"
 
@@ -398,6 +417,12 @@ class FinnhubProvider:
         payload = self.client.get_json("/calendar/earnings", {"from": start.isoformat(), "to": end.isoformat()},
                                        cache_ttl=timedelta(hours=6))
         return parse_finnhub_earnings(payload)
+
+    def fetch_company_news(self, symbol: str, start: date, end: date) -> list[dict[str, Any]]:
+        payload = self.client.get_json("/company-news", {"symbol": symbol, "from": start.isoformat(),
+                                                         "to": end.isoformat()},
+                                       symbol=symbol, cache_ttl=timedelta(hours=6))
+        return parse_finnhub_news(payload)
 
 
 SOURCE_REGISTRY: dict[str, dict[str, str]] = {

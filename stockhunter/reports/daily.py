@@ -13,7 +13,6 @@ from sqlalchemy.engine import Engine
 
 from stockhunter.db.models import (
     DataAnomaly,
-    Filing,
     Instrument,
     MacroObservation,
     MacroSeries,
@@ -76,10 +75,8 @@ def build_report(engine: Engine, kind: str = "evening", now: datetime | None = N
                              .where(MarketEvent.event_type == "earnings", MarketEvent.event_date > as_of,
                                     MarketEvent.event_date <= as_of + timedelta(days=10))
                              .order_by(MarketEvent.event_date)).all()
-        results = s.execute(select(Filing.filed_date, Filing.url, Instrument.symbol).join(Instrument)
-                            .where(Filing.form == "8-K", Filing.items.like("%2.02%"),
-                                   Filing.filed_date > as_of - timedelta(days=4), Filing.filed_date <= as_of + timedelta(days=1))
-                            .order_by(Filing.filed_date.desc())).all()
+        from stockhunter.catalysts.recent import recent_catalysts
+        catalysts = recent_catalysts(s, as_of - timedelta(days=4), as_of + timedelta(days=1))
         events = s.execute(select(PaperTradeEvent, Instrument.symbol).select_from(PaperTradeEvent)
                            .join(PaperTrade, PaperTrade.id == PaperTradeEvent.trade_id)
                            .join(Instrument, Instrument.id == PaperTrade.instrument_id)
@@ -119,9 +116,14 @@ def build_report(engine: Engine, kind: str = "evening", now: datetime | None = N
         m.append(f"chômage {_num(macro['UNRATE'][0][1], 1)} % ({macro['UNRATE'][0][0].strftime('%m/%Y')})")
     L += ["", "<b>2. Macro</b>", e(" · ".join(m)) or "N/D"]
     # 3. Nouvelles documentées
-    L += ["", "<b>3. Publications de résultats (SEC 8-K, univers suivi)</b>"]
-    L += [f"• {e(sym)} le {d.strftime('%d/%m')} — <a href=\"{e(u)}\">dépôt SEC</a>" for d, u, sym in results[:8]] or \
-         ["Aucune sur les derniers jours. (Analyse des actualités : phase 6.)"]
+    L += ["", "<b>3. Catalyseurs documentés (SEC 8-K et presse, univers suivi, 4 jours)</b>"]
+    L += [f"• {'⚠️ ' if c['watch'] else ''}<b>{e(c['symbol'])}</b> {c['date'].strftime('%d/%m')} · {e(c['kind'])} — "
+          f"{e(c['label'][:160])} (<a href=\"{e(c['url'])}\">{e(c['source'])}</a>)" for c in catalysts[:10]] or \
+         ["Aucun dépôt ni article important sur les derniers jours."]
+    if len(catalysts) > 10:
+        L.append(f"… {len(catalysts) - 10} autre(s) sur le dashboard.")
+    L.append("<i>Classement par type d'événement (rubriques SEC, mots-clés des titres) : il ne dit pas si "
+             "l'effet est positif ou négatif.</i>")
     # 4. Secteurs
     srt = sorted(sectors.items(), key=lambda x: x[1]["rank"])
     if srt:

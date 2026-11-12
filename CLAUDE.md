@@ -44,7 +44,9 @@ Méthode détaillée : `docs/scoring.md`. Protocole de backtest et résultats : 
   notifications/       Telegram : file persistante, déduplication, retries, anti-spam, commandes
   portfolio/manual.py  portefeuille RÉEL saisi à la main (prix moyen, P&L, dividendes, EUR/USD daté)
   dashboard/           FastAPI + Jinja + HTMX + Chart.js (scripts embarqués), auth scrypt, CSRF, CSP
-Phases suivantes : actualités et synthèses (6), déploiement (7), audit final (8). Ancien plan : `risk/ portfolio/ notifications/ reports/ dashboard/`.
+  catalysts/           rubriques 8-K et titres d'articles classés par règles ; catalyseurs récents (rapport, alertes)
+  analysis/synthesis.py synthèse écrite et sourcée par action (règles, sans LLM), famille E informative
+Phases 6 (actualités et synthèses) et 7 (déploiement Railway) livrées ; reste l'audit final (8). Ancien plan : `risk/ portfolio/ notifications/ reports/ dashboard/`.
 Cycle d'une stratégie : RESEARCH → BACKTEST → OUT-OF-SAMPLE → PAPER → PROMOTED.
 
 ## Commandes
@@ -52,7 +54,7 @@ Cycle d'une stratégie : RESEARCH → BACKTEST → OUT-OF-SAMPLE → PAPER → P
 pip install -e ".[dev]"
 stockhunter init-db                 # migrations
 stockhunter sync-universe
-stockhunter ingest all              # ou prices | fundamentals | macro | earnings [--symbols A,B] [--full]
+stockhunter ingest all              # ou prices | fundamentals | macro | earnings | news [--symbols A,B] [--full]
 stockhunter quality
 stockhunter status
 stockhunter prices AAPL -n 10
@@ -60,6 +62,7 @@ stockhunter verify-sources          # appels réels
 stockhunter scan [--as-of AAAA-MM-JJ] [--if-new] [--require-fresh]
 stockhunter top [-n 10] [--all]
 stockhunter explain NVDA
+stockhunter analyse NVDA [--as-of AAAA-MM-JJ] [--out f.md]   # synthèse sourcée (phase 6)
 stockhunter validate --out rapport.md --signals-cache var/signals-cache.pkl   # backtest (3 min)
 stockhunter market sync|status      # univers large : toutes les actions US (Massive, gratuit, 2 ans)
 stockhunter research broad [--out f.md]   # étude pré-enregistrée (docs/research/)

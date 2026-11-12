@@ -11,6 +11,7 @@ n'avait pas d'accès réseau sortant vers ces API au moment de la phase 1.
 | Dépôts 8-K, 10-K, 10-Q, Form 4, 13D/G, S-1/S-3 | **SEC EDGAR** submissions | 0 € | idem ; 1000 dépôts récents par fichier | implémenté (métadonnées) |
 | Taux, inflation, VIX, courbe | **FRED** | 0 € | clé gratuite ; ~120 req/min | implémenté, non testé en réel |
 | Calendrier des résultats | **Finnhub** (Free) | 0 € | 60 req/min (30 configurés par prudence) ; usage personnel ; **chandeliers payants** | implémenté, optionnel |
+| Actualités (titres, éditeur, lien) | **Finnhub** `/company-news` (Free) | 0 € | 1 appel par action et par soir ; on stocke titre, éditeur, lien et date de publication, jamais le texte intégral des articles | implémenté (phase 6) |
 
 ## Choix écartés
 - **Finnhub pour l'historique de prix** : les chandeliers actions sont réservés aux plans payants.

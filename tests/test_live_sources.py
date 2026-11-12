@@ -52,3 +52,14 @@ def test_finnhub_live(live):
         pytest.skip("SH_FINNHUB_API_KEY absent")
     events = FinnhubProvider(s, e).fetch_earnings_calendar(date.today(), date.today() + timedelta(days=7))
     assert isinstance(events, list)
+
+
+def test_finnhub_news_live(live):
+    """Actualités réelles : au moins un article récent sur AAPL, avec lien et date de publication."""
+    s, e = live
+    if not s.finnhub_api_key:
+        pytest.skip("SH_FINNHUB_API_KEY absent")
+    news = FinnhubProvider(s, e).fetch_company_news("AAPL", date.today() - timedelta(days=7), date.today())
+    assert news, "aucun article reçu"
+    a = news[0]
+    assert a["url"].startswith("http") and a["headline"] and a["published_at"].tzinfo is not None

@@ -98,6 +98,35 @@ def enqueue_trade_events(engine: Engine) -> int:
     return n
 
 
+def enqueue_catalyst_alerts(engine: Engine, lookback_days: int = 2) -> int:
+    """Alerte sur un catalyseur important (hors simple publication de résultats) touchant une action READY,
+    DEVELOPING ou en position simulée. Une seule alerte par événement (clé de déduplication)."""
+    from stockhunter.catalysts.recent import recent_catalysts
+    from stockhunter.db.models import PaperTrade, ScanRun
+
+    with session_scope(engine) as s:
+        run = s.scalars(select(ScanRun).order_by(ScanRun.as_of.desc(), ScanRun.id.desc()).limit(1)).first()
+        if run is None:
+            return 0
+        watched = dict(s.execute(select(Instrument.symbol, Score.status).join(Score)
+                                 .where(Score.scan_run_id == run.id, Score.status.in_(("READY", "DEVELOPING")))).all())
+        for sym, st in s.execute(select(Instrument.symbol, PaperTrade.status).join(PaperTrade, PaperTrade.instrument_id == Instrument.id)
+                                 .where(PaperTrade.status.in_(("PLANNED", "OPEN")))):
+            watched[sym] = f"position simulée {'ouverte' if st == 'OPEN' else 'planifiée'}"
+        cats = [c for c in recent_catalysts(s, run.as_of - timedelta(days=lookback_days), run.as_of + timedelta(days=1),
+                                            set(watched))
+                if not c["earnings_only"] and (c["importance"] >= 3 or c["watch"])]
+    n = 0
+    for c in cats:
+        text = (f"<b>STOCKHUNTER AI — Catalyseur {e(c['symbol'])}</b> ({e(watched[c['symbol']])})\n"
+                f"{'⚠️ ' if c['watch'] else ''}{c['date'].strftime('%d/%m/%Y')} · {e(c['kind'])} — {e(c['label'][:300])}\n"
+                f"Source : <a href=\"{e(c['url'])}\">{e(c['source'])}</a>\n"
+                f"<i>Événement classé par type, pas par effet attendu. Lire la source ; /analyse {e(c['symbol'])} "
+                f"pour la synthèse.</i>")
+        n += enqueue(engine, "alert", f"catalyst:{c['key']}", text)
+    return n
+
+
 def unresolved_failures(s, now: datetime, hours: int = 24) -> list[JobRun]:
     """Échecs des dernières heures qui n'ont PAS été suivis d'une exécution réussie du même job :
     une panne déjà réparée ne déclenche pas d'alerte."""
@@ -166,16 +195,24 @@ def flush(engine: Engine, client: TelegramClient | None, max_messages: int = 15)
 
 # --------------------------------------------------------------------------- commandes
 HELP = ("<b>Commandes StockHunter</b>\n/today — dernier rapport\n/top — classement du jour\n"
-        "/watchlist — actions en veille\n/portfolio — portefeuille simulé\n/status — état du système\n\n"
-        "<i>Les commandes sont lues à chaque exécution planifiée (matin et soir) : la réponse peut arriver "
-        "plusieurs heures après la demande.</i>")
+        "/watchlist — actions en veille\n/portfolio — portefeuille simulé\n/analyse SYMBOLE — synthèse sourcée "
+        "d'une action (ex. /analyse MA)\n/status — état du système\n\n"
+        "<i>Réponse en quelques secondes quand le serveur Railway est actif ; sinon au prochain envoi planifié.</i>")
 
 
 def answer(engine: Engine, cmd: str) -> str:
     from stockhunter.portfolio import paper
     from stockhunter.reports.daily import build_report
 
-    cmd = cmd.split("@")[0].strip().lower()
+    parts = cmd.strip().split()
+    cmd = parts[0].split("@")[0].lower() if parts else ""
+    if cmd in ("/analyse", "/analyze", "/a"):
+        from stockhunter.analysis.synthesis import build, to_telegram
+        if len(parts) < 2:
+            return "Usage : /analyse SYMBOLE (ex. /analyse MA)"
+        sym = parts[1].upper()[:12]
+        syn = build(engine, sym)
+        return to_telegram(syn) if syn else f"{e(sym)} ne fait pas partie de l'univers suivi."
     if cmd in ("/today", "/start"):
         return build_report(engine, "evening")[0]
     if cmd in ("/top", "/watchlist"):
@@ -204,7 +241,8 @@ def answer(engine: Engine, cmd: str) -> str:
             jobs = s.execute(select(JobRun.job_name, JobRun.status, JobRun.started_at)
                              .order_by(JobRun.id.desc()).limit(8)).all()
         return "<b>État du système</b>\n" + "\n".join(
-            f"• {j} : {st} ({t.strftime('%d/%m %H:%M')} UTC)" for j, st, t in jobs)
+            f"• {j} : {st} ({(t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(PARIS):%d/%m %H:%M} Paris)"
+            for j, st, t in jobs)
     return HELP
 
 
@@ -254,6 +292,7 @@ def run_notifications(engine: Engine, settings: Settings, kind: str, now: dateti
         key = f"report:{kind}:{as_of if kind == 'evening' else paris.date()}"
         out["rapport"] = "mis en file" if enqueue(engine, f"report_{kind}", key, text) else "déjà envoyé (dédupliqué)"
     out["alertes_trading"] = enqueue_trade_events(engine)
+    out["alertes_catalyseurs"] = enqueue_catalyst_alerts(engine)
     out["alertes_systeme"] = enqueue_system_alerts(engine, now)
     out["commandes"] = process_commands(engine, client)
     out.update(flush(engine, client, settings.telegram_max_per_run))

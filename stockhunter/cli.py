@@ -2,7 +2,7 @@
 
   stockhunter init-db                 crée / migre la base (Alembic)
   stockhunter sync-universe           charge l'univers et résout les CIK SEC
-  stockhunter ingest {prices,fundamentals,macro,earnings,all} [--symbols A,B] [--full]
+  stockhunter ingest {prices,fundamentals,macro,earnings,news,all} [--symbols A,B] [--full]
   stockhunter quality                 contrôles qualité + anomalies en base
   stockhunter status                  couverture réelle, fraîcheur, quotas, derniers jobs
   stockhunter prices SYMBOL [-n 10]   consulter les barres stockées (datées, jamais présentées comme live)
@@ -78,7 +78,7 @@ def cmd_sync_universe(settings: Settings, engine, args) -> int:
 
 def cmd_ingest(settings: Settings, engine, args) -> int:
     symbols = [s.strip().upper() for s in args.symbols.split(",")] if args.symbols else None
-    targets = ["prices", "fundamentals", "macro", "earnings"] if args.what == "all" else [args.what]
+    targets = ["prices", "fundamentals", "macro", "earnings", "news"] if args.what == "all" else [args.what]
     code = 0
     for t in targets:
         try:
@@ -95,10 +95,13 @@ def cmd_ingest(settings: Settings, engine, args) -> int:
                 p = FredProvider(settings, engine)
                 run = run_job(engine, "ingest_macro",
                               lambda ctx: ingestion.ingest_macro(engine, ctx, p, settings.price_history_years))
-            else:
+            elif t == "earnings":
                 p = FinnhubProvider(settings, engine)
                 run = run_job(engine, "ingest_earnings",
                               lambda ctx: ingestion.ingest_earnings_calendar(engine, ctx, p))
+            else:
+                p = FinnhubProvider(settings, engine)
+                run = run_job(engine, "ingest_news", lambda ctx: ingestion.ingest_news(engine, ctx, p, symbols=symbols))
         except ProviderError as exc:
             print(f"[{t}] IGNORÉ : {exc}")
             code = max(code, 2)
@@ -195,6 +198,7 @@ def cmd_verify_sources(settings: Settings, engine, args) -> int:
         ("sec_edgar", lambda: SecEdgarProvider(settings, engine).fetch_submissions("320193", "AAPL").filings[:1]),
         ("fred", lambda: FredProvider(settings, engine).fetch_observations("DGS10", date.today() - timedelta(days=14))),
         ("finnhub", lambda: FinnhubProvider(settings, engine).fetch_earnings_calendar(date.today(), date.today() + timedelta(days=3))),
+        ("finnhub_news", lambda: FinnhubProvider(settings, engine).fetch_company_news("AAPL", date.today() - timedelta(days=7), date.today())),
     ]
     for name, fn in checks:
         try:
@@ -222,7 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init-db")
     sub.add_parser("sync-universe")
     ing = sub.add_parser("ingest")
-    ing.add_argument("what", choices=["prices", "fundamentals", "macro", "earnings", "all"])
+    ing.add_argument("what", choices=["prices", "fundamentals", "macro", "earnings", "news", "all"])
     ing.add_argument("--symbols")
     ing.add_argument("--full", action="store_true", help="recharge l'historique complet")
     sub.add_parser("quality")

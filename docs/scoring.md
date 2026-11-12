@@ -35,7 +35,22 @@ au-dessus de leur MM50 (> 55 % / < 40 %). Moyenne ≥ 0,5 : RISK-ON ; ≤ −0,5
 - **B Earnings momentum (PEAD)** : 8-K résultats récent, réaction > +3 % vs SPY, dérive depuis ≥ 0, bénéfice en croissance.
 - **C Growth acceleration** : CA > +10 % a/a, en accélération, marge op. en hausse, fondamentaux à jour.
 - **D Sector rotation** : secteur dans le top 3, surperformance vs son ETF sectoriel sur 3 m.
-- **E Catalyst** : phase 6. **F High potential** : non applicable (univers de grandes capitalisations).
+- **E Catalyst (informatif, hors score)** : 8-K de forte importance hors résultats déposé depuis moins de 14 jours
+  (accord important, acquisition, restructuration, dépréciation, changement de contrôle…) ou article de presse
+  « justice / réglementaire / fusion / prévisions » publié depuis moins de 7 jours. Ne modifie ni le score ni le statut
+  (une telle règle devrait d'abord passer la validation historique, impossible faute d'historique d'actualités
+  fiable). Calcul : `stockhunter/analysis/synthesis.py`. **F High potential** : non applicable (grandes capitalisations).
+
+## Synthèse sourcée (phase 6)
+`stockhunter analyse SYMBOLE`, page action du dashboard, commande Telegram `/analyse SYMBOLE`.
+Texte produit par règles, sans IA générative : chaque phrase reprend une donnée datée de la base avec sa source
+(dépôt SEC, article, clôture Tiingo, scan). Point-in-time : à la date J, seuls les 8-K déposés au plus tard à J et
+les articles publiés avant la fin de J (heure de New York) sont utilisés.
+- Rubriques 8-K : table fixe `catalysts/classify.py` (libellé, importance 1-3, point de vigilance).
+- Articles : classement par mots-clés du titre (justice, réglementaire, fusion, résultats, prévisions, analystes,
+  direction, capital, contrat/produit). Indicatif : **aucune analyse de sentiment**, aucun « positif / négatif ».
+- Alertes Telegram : catalyseur important (hors simple publication de résultats) touchant une action READY,
+  DEVELOPING ou en position simulée ; une seule alerte par événement.
 
 ## Statuts
 | Statut | Règle |

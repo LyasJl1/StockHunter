@@ -161,7 +161,8 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
         det = queries.stock_detail(engine, symbol)
         if det is None:
             raise HTTPException(404, "symbole hors univers")
-        return render(request, "stock.html", sess, d=det)
+        from stockhunter.analysis.synthesis import build
+        return render(request, "stock.html", sess, d=det, syn=build(engine, symbol))
 
     @app.get("/api/prices/{symbol}")
     def prices(request: Request, symbol: str):

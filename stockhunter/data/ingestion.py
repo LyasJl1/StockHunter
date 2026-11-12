@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 
 from stockhunter.data.calendar import last_completed_session
-from stockhunter.data.http import NotFound
+from stockhunter.data.http import NotFound, QuotaExceeded
 from stockhunter.data.providers import (
     FRED_SERIES,
     SOURCE_REGISTRY,
@@ -32,6 +32,7 @@ from stockhunter.db.models import (
     MacroObservation,
     MacroSeries,
     MarketEvent,
+    NewsItem,
     PriceBar,
 )
 from stockhunter.db.session import session_scope
@@ -255,3 +256,29 @@ def ingest_earnings_calendar(engine: Engine, ctx: JobContext, finnhub: FinnhubPr
     with session_scope(engine) as s:
         upsert(s, MarketEvent, rows, ["instrument_id", "event_type", "event_date", "source_id"])
     ctx.success(len(rows))
+
+
+def ingest_news(engine: Engine, ctx: JobContext, finnhub: FinnhubProvider, days_back: int = 10,
+                symbols: list[str] | None = None, today: date | None = None) -> None:
+    """Articles des derniers jours pour chaque action suivie (1 appel par action ; idempotent)."""
+    from stockhunter.catalysts.classify import classify_headline
+
+    sources = ensure_sources(engine)
+    src_id = sources[FinnhubProvider.NAME]
+    today = today or date.today()
+    total = 0
+    for inst in _instruments(engine, symbols, asset_type="stock"):
+        try:
+            items = finnhub.fetch_company_news(inst.symbol, today - timedelta(days=days_back), today)
+        except Exception as exc:  # un échec par action ne bloque pas les autres
+            ctx.failure(inst.symbol, exc)
+            if isinstance(exc, QuotaExceeded):
+                break
+            continue
+        rows = [{**a, "instrument_id": inst.id, "source_id": src_id, "category": classify_headline(a["headline"])}
+                for a in items]
+        if rows:
+            with session_scope(engine) as s:
+                upsert(s, NewsItem, rows, ["source_id", "instrument_id", "external_id"])
+        total += len(rows)
+    ctx.success(total)
