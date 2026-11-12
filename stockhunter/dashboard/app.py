@@ -197,7 +197,7 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
         from stockhunter.scoring.config import DEFAULT_CONFIG
         from stockhunter.universe import load_universe
         return render(request, "settings.html", sess, cfg=paper.load_config(engine), scoring=DEFAULT_CONFIG,
-                      sources=settings.provider_status(), universe=load_universe(settings.universe_file),
+                      sources=_sources(engine, settings), universe=load_universe(settings.universe_file),
                       saved=saved, error=error, morning=settings.report_morning_hour_paris)
 
     @app.post("/settings")
@@ -257,3 +257,32 @@ def _by_strategy(engine: Engine) -> list[dict]:
                 d["gagnants"] += net > 0
                 d["jours"] += (t.exit_date - t.entry_date).days if t.exit_date and t.entry_date else 0
     return sorted(out.values(), key=lambda x: x["strategie"])
+
+
+def _sources(engine, settings) -> list[dict]:
+    """État des sources vu depuis la base : la collecte tourne sur GitHub Actions, pas sur ce serveur.
+
+    On affiche le dernier appel réussi enregistré (table api_calls) ; la clé locale n'est indiquée
+    qu'à titre d'information, car le serveur web n'appelle pas les fournisseurs de données.
+    """
+    from datetime import timezone
+
+    from sqlalchemy import func, select
+    from stockhunter.db.models import ApiCall
+    from stockhunter.db.session import session_scope
+
+    with session_scope(engine) as s:
+        last = dict(s.execute(select(ApiCall.provider, func.max(ApiCall.called_at))
+                              .where(ApiCall.status_code == 200).group_by(ApiCall.provider)).all())
+    rows = []
+    for name, local in settings.provider_status().items():
+        ts = last.get(name)
+        if ts is not None:  # SQLite rend une date naïve (UTC), PostgreSQL une date dans le fuseau de session
+            ts = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts.astimezone(timezone.utc)
+        if name == "telegram":
+            rows.append({"name": name, "last_ok": "envoi direct (non journalisé ici)",
+                         "local": "configuré" if local == "configuré" else "MANQUANT sur ce serveur"})
+            continue
+        rows.append({"name": name, "last_ok": ts.strftime("%d/%m/%Y %H:%M UTC") if ts else None,
+                     "local": "clé présente" if local == "configuré" else "clé absente (normal)"})
+    return rows

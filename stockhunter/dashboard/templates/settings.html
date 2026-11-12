@@ -20,8 +20,8 @@
 <tr><td>Seuil READY / DEVELOPING / rejet</td><td class="r">{{ scoring.thresholds.ready_at|int }} / {{ scoring.thresholds.developing_at|int }} / {{ scoring.thresholds.reject_below|int }}</td></tr>
 <tr><td>Liquidité minimale</td><td class="r">{{ (scoring.thresholds.min_dollar_volume/1e6)|int }} M$ / jour</td></tr></table>
 <p class="sub">Changer un poids ou un seuil crée une nouvelle version, qui doit repasser la validation historique (phase 3) : ces paramètres se modifient dans le code, pas ici.</p></div>
-<div class="card"><h2>Sources de données</h2><table>{% for k, v in sources.items() %}<tr><td>{{ k }}</td><td class="{{ 'neg' if 'MANQUANT' in v }}">{{ v }}</td></tr>{% endfor %}</table>
-<p class="sub">État de ce serveur. Les secrets se gèrent par variables d'environnement, jamais ici.</p></div>
+<div class="card"><h2>Sources de données</h2><table><tr><th>Source</th><th>Dernier appel réussi</th><th>Sur ce serveur</th></tr>{% for r in sources %}<tr><td>{{ r.name }}</td><td class="{{ '' if r.last_ok else 'neg' }}">{{ r.last_ok or 'aucun enregistré' }}</td><td class="sub">{{ r.local }}</td></tr>{% endfor %}</table>
+<p class="sub">La collecte des données tourne sur GitHub Actions (clés API dans l'environnement GitHub « Variables ») ; ce serveur web ne les appelle pas, ses clés absentes sont donc normales. « Dernier appel réussi » vient du journal en base (30 derniers jours). Telegram est utilisé directement par ce serveur.</p></div>
 <div class="card"><h2>Univers et calendrier</h2>
 <p>Univers suivi : <b>{{ universe|length }}</b> instruments ({{ universe|selectattr('asset_type','equalto','stock')|list|length }} actions) — fichier <code>stockhunter/universe/us_seed.csv</code>. Univers large (recherche) : toutes les actions US via Massive.</p>
 <p>Rapport du matin : {{ morning }} h (heure de Paris, en semaine) · rapport du soir : après l'ingestion (~0 h 15 à Paris) · analyses : chaque soir de bourse.</p>

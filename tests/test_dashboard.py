@@ -88,3 +88,20 @@ def test_settings_bounds_and_effect(engine, client):
     cfg = paper.load_config(engine)
     assert cfg.capital == 50000 and cfg.risk_fraction == 0.01 and cfg.max_positions == 5
     assert date.today()
+
+
+def test_settings_sources_from_database(engine, client):
+    """Les sources affichent le dernier appel réussi en base, pas l'absence de clé sur le serveur web."""
+    from datetime import datetime, timezone
+    from stockhunter.db.models import ApiCall
+    from stockhunter.db.session import session_scope
+    with session_scope(engine) as s:
+        s.add(ApiCall(provider="tiingo", endpoint="/fixture", status_code=200,
+                      called_at=datetime(2026, 11, 12, 23, 20, tzinfo=timezone.utc)))
+        s.add(ApiCall(provider="fred", endpoint="/fixture", status_code=500,
+                      called_at=datetime(2026, 11, 12, 23, 21, tzinfo=timezone.utc)))
+    login(client)
+    page = client.get("/settings").text
+    assert "12/11/2026 23:20 UTC" in page          # tiingo : appel réussi
+    assert "23:21" not in page                      # fred : échec non compté comme réussi
+    assert "MANQUANT: SH_TIINGO_API_KEY" not in page
