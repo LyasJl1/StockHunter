@@ -382,6 +382,54 @@ def cmd_analyse(settings, engine, args) -> int:
     return 0
 
 
+def cmd_discover(settings, engine, args) -> int:
+    """Moteur de découverte v3 : classement multi-catégories de l'univers large, analyse approfondie, suivi."""
+    from stockhunter.discovery import engine as disc
+    from stockhunter.discovery import store as dstore
+    from stockhunter.lab.panel import load_panel
+    from stockhunter.market.store import MarketStore
+    if args.action == "status":
+        perf = dstore.performance(engine)
+        if not perf:
+            print("Aucun signal de découverte enregistré.")
+        for cat, r in perf.items():
+            print(f"  {cat:10} signaux {r['signaux']:4}  finalisés {r['finalises']:4}  trades {r['trades']:4}  "
+                  f"R moyen {r['r_moyen'] if r['r_moyen'] is None else round(r['r_moyen'], 2)}  ({r['lecture']})")
+        return 0
+    try:
+        p = load_panel(engine, MarketStore(settings.market_dir))
+    except RuntimeError as exc:
+        print(f"IGNORÉ : {exc}")
+        return 2
+    res = disc.run(p, dstore.ticker_names(engine), validation=dstore.registry_decisions())
+    run_id, created = dstore.save(engine, res)
+    print(f"Découverte du {res['as_of']} : univers {res['univers']} titres, marché {res['marche']['regime']} "
+          f"({'enregistrée' if created else 'déjà enregistrée, non réécrite'}, #{run_id})")
+    for k, v in res["categories"].items():
+        names = ", ".join(c["ticker"] for c in v["candidats"][:10])
+        print(f"  {v['label']:36} admis {v['admis']:4}  {'SUSPENDUE' if v['suspendue'] else names or '—'}")
+    print(res["conclusion"])
+    if created:
+        sec = fin = None
+        try:
+            sec = SecEdgarProviderLazy(settings, engine)
+        except Exception as exc:
+            print(f"  analyse SEC indisponible : {exc}")
+        try:
+            from stockhunter.data.providers import FinnhubProvider
+            fin = FinnhubProvider(settings, engine)
+        except Exception as exc:
+            print(f"  actualités indisponibles : {exc}")
+        print(f"Analyse approfondie : {dstore.deepen(engine, res, p, sec, fin)}")
+    print(f"Suivi des signaux : {dstore.update_outcomes(engine, p)}")
+    return 0
+
+
+def SecEdgarProviderLazy(settings, engine):
+    from stockhunter.data.providers import SecEdgarProvider
+    return SecEdgarProvider(settings, engine)
+
+
 def cmd_pipeline(settings, engine, args) -> int:
     from stockhunter import pipeline
     return pipeline.run(engine)
@@ -434,6 +482,8 @@ def add_parsers(sub) -> dict:
     an.add_argument("symbol")
     an.add_argument("--as-of", help="date AAAA-MM-JJ (point-in-time), défaut : dernier scan")
     an.add_argument("--out", help="fichier Markdown")
+    dc = sub.add_parser("discover", help="moteur de découverte v3 (univers large, multi-catégories)")
+    dc.add_argument("action", choices=["run", "status"])
     pl = sub.add_parser("pipeline", help="chaîne nocturne complète (collecte → rapports), échecs critiques non masqués")
     pl.add_argument("name", choices=["nightly"])
     lb = sub.add_parser("lab", help="laboratoire de recherche v3 (programme pré-enregistré, registre)")
@@ -472,6 +522,6 @@ def add_parsers(sub) -> dict:
     cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
     cp.add_argument("action", choices=["copy-to"])
     cp.add_argument("target", help="URL de la base cible, déjà migrée et vide")
-    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "pipeline": cmd_pipeline, "validate": cmd_validate, "market": cmd_market,
+    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "pipeline": cmd_pipeline, "discover": cmd_discover, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
             "dashboard": cmd_dashboard, "db": cmd_db}

@@ -520,3 +520,69 @@ class ManualTransaction(Base):
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     note: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ============================================================================ découverte v3 (univers large)
+class DiscoveryRun(Base):
+    """Classement quotidien du moteur de découverte. Inséré une fois par séance et version, jamais modifié."""
+
+    __tablename__ = "discovery_runs"
+    __table_args__ = (UniqueConstraint("as_of", "engine_version", name="uq_discovery_run"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    as_of: Mapped[date] = mapped_column(Date, index=True)
+    engine_version: Mapped[str] = mapped_column(String(20))
+    universe_size: Mapped[int] = mapped_column(Integer)
+    overview_json: Mapped[str] = mapped_column(Text)        # marché (breadth, régime) + état des catégories
+    conclusion: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DiscoveryCandidate(Base):
+    """Action relevée par une catégorie à une date : fiche figée (raisons, mesures, plan simulé)."""
+
+    __tablename__ = "discovery_candidates"
+    __table_args__ = (UniqueConstraint("run_id", "ticker", "category", name="uq_discovery_candidate"),
+                      Index("ix_discovery_ticker", "ticker", "as_of"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("discovery_runs.id", ondelete="CASCADE"), index=True)
+    as_of: Mapped[date] = mapped_column(Date)
+    ticker: Mapped[str] = mapped_column(String(20))
+    name: Mapped[str | None] = mapped_column(String(255))
+    category: Mapped[str] = mapped_column(String(20))
+    rank: Mapped[int] = mapped_column(Integer)
+    score: Mapped[float] = mapped_column(Float)
+    close: Mapped[float] = mapped_column(Float)
+    confidence: Mapped[float] = mapped_column(Float)
+    card_json: Mapped[str] = mapped_column(Text)
+
+
+class DiscoveryOutcome(Base):
+    """Résultat d'un candidat, calculé après coup avec les règles de trading partagées (suivi unitaire, sans
+    contrainte de portefeuille). Mis à jour jusqu'à ce que `final` soit vrai, puis figé."""
+
+    __tablename__ = "discovery_outcomes"
+
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("discovery_candidates.id", ondelete="CASCADE"), primary_key=True)
+    status: Mapped[str] = mapped_column(String(12))          # PLANNED | OPEN | CLOSED | CANCELLED
+    final: Mapped[bool] = mapped_column(Boolean, default=False)
+    entry_date: Mapped[date | None] = mapped_column(Date)
+    exit_date: Mapped[date | None] = mapped_column(Date)
+    r_multiple: Mapped[float | None] = mapped_column(Float)   # P&L net ÷ risque initial
+    ret_20: Mapped[float | None] = mapped_column(Float)       # rendement à 20 séances (ouverture J+1 -> clôture J+20)
+    excess_20: Mapped[float | None] = mapped_column(Float)    # idem, moins l'univers équipondéré
+    detail: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class DiscoveryDeep(Base):
+    """Analyse approfondie la plus récente d'un candidat (série de cours pour le graphique, fondamentaux SEC
+    résumés, dépôts, actualités). Une ligne par titre, remplacée à chaque passage : taille bornée."""
+
+    __tablename__ = "discovery_deep"
+
+    ticker: Mapped[str] = mapped_column(String(20), primary_key=True)
+    as_of: Mapped[date] = mapped_column(Date)
+    payload: Mapped[str] = mapped_column(Text)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
