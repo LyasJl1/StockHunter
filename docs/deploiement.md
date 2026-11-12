@@ -14,8 +14,9 @@ service, 0,5 Go de stockage. Taille mesurée de la base dans PostgreSQL : ~120 M
 2. Dans le projet : **+ New → Database → PostgreSQL**.
 3. Service web → **Variables** :
    - `SH_DATABASE_URL` = `${{Postgres.DATABASE_URL}}` (référence interne Railway, pas de trafic facturé)
-   - `SH_DASHBOARD_PASSWORD_HASH` et `SH_DASHBOARD_SECRET` : produits par `stockhunter dashboard hash-password`
-     (ou par le workflow GitHub « Générer les accès dashboard »)
+   - `SH_DASHBOARD_PASSWORD_HASH` : produit par le workflow GitHub « Générer les accès dashboard »
+     (ou `stockhunter dashboard hash-password` en local)
+   - `SH_DASHBOARD_SECRET` = `${{ secret(48) }}` (généré par Railway, jamais affiché ailleurs)
    - `SH_TELEGRAM_BOT_TOKEN`, `SH_TELEGRAM_CHAT_ID` (mêmes valeurs que dans GitHub)
 4. Service web → **Settings → Networking → Generate Domain** : adresse HTTPS du dashboard.
 5. Service PostgreSQL → **Variables** : copier `DATABASE_PUBLIC_URL`.
