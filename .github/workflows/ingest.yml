@@ -13,8 +13,10 @@ on:
         type: choice
         options: [all, prices, fundamentals, macro, earnings]
   schedule:
-    # Mar–sam 23:15 UTC : après publication des clôtures US de lun–ven
+    # Après les clôtures US de lun–ven. Deux passages car l'univers (58 symboles) dépasse
+    # le quota Tiingo Free de 50 req/h : le 2e run termine les symboles restants.
     - cron: "15 23 * * 2-6"
+    - cron: "25 0 * * 3-6,0"
 
 concurrency:
   group: ingestion          # jamais deux ingestions en parallèle sur la même base

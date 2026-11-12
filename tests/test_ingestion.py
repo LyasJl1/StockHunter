@@ -37,8 +37,6 @@ def mock_tiingo(last_day=date(2026, 11, 11), split_on=None, calls=None):
         return httpx.Response(200, json=FIXTURE_tiingo_bars(start, last_day, split_on=split_on))
 
     respx.get(url__regex=r"https://api\.tiingo\.com/tiingo/daily/(?P<sym>\w+)/prices.*").mock(side_effect=prices)
-    respx.get(url__regex=r"https://api\.tiingo\.com/tiingo/daily/\w+(\?.*)?$").mock(
-        return_value=httpx.Response(200, json={"name": "FICTIF"}))
 
 
 def setup_universe(engine, settings):
@@ -95,7 +93,7 @@ def test_split_triggers_full_reload(engine, settings):
 @respx.mock
 def test_unknown_symbol_is_reported_not_invented(engine, settings):
     setup_universe(engine, settings)
-    respx.get(url__regex=r"https://api\.tiingo\.com/tiingo/daily/zzbm(\?.*)?$").mock(return_value=httpx.Response(404))
+    respx.get(url__regex=r"https://api\.tiingo\.com/tiingo/daily/zzbm/prices.*").mock(return_value=httpx.Response(404))
     mock_tiingo()
     ctx = JobContext(run_id=0)
     ingestion.ingest_prices(engine, ctx, TiingoProvider(settings, engine, **nosleep), 1, today=TODAY)
@@ -162,3 +160,22 @@ def test_missing_keys_fail_explicitly(engine, settings):
     settings.sec_user_agent = "noemail"
     with pytest.raises(ProviderError, match="e-mail"):
         SecEdgarProvider(settings, engine)
+
+
+@respx.mock
+def test_tiingo_429_stops_run_without_retry_and_resumes_oldest_first(engine, settings):
+    setup_universe(engine, settings)
+    calls = []
+    mock_tiingo(calls=calls)
+    tiingo = TiingoProvider(settings, engine, **nosleep)
+    ingestion.ingest_prices(engine, JobContext(run_id=0), tiingo, 1, symbols=["ZZTA"], today=TODAY)
+    assert len(calls) == 1  # un seul appel par symbole
+
+    respx.clear()
+    route = respx.get(url__regex=r"https://api\.tiingo\.com/.*").mock(return_value=httpx.Response(429))
+    ctx = JobContext(run_id=0)
+    ingestion.ingest_prices(engine, ctx, tiingo, 1, today=TODAY)
+    assert route.call_count == 1          # pas de retry, arrêt immédiat du run
+    assert ctx.failed == 1 and "quota" in ctx.errors[0]
+    # l'ordre : symboles jamais chargés d'abord (ZZBM/ZZTB), ZZTA déjà à jour en dernier
+    assert "ZZTA" not in ctx.errors[0]

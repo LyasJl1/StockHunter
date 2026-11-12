@@ -77,6 +77,7 @@ class TiingoProvider:
             headers={"Content-Type": "application/json"},
             auth_params={"token": settings.tiingo_api_key.get_secret_value()},
             min_interval_s=1.0,
+            quota_status_codes=(429,),  # chez Tiingo, 429 = quota horaire/journalier épuisé
             quotas=[QuotaWindow(timedelta(hours=1), lim.tiingo_per_hour),
                     QuotaWindow(timedelta(days=1), lim.tiingo_per_day)],
             timeout_s=settings.http_timeout_s,

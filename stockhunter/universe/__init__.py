@@ -21,6 +21,7 @@ class UniverseEntry:
     asset_type: str
     role: str
     sector: str | None
+    name: str | None = None
 
 
 def load_universe(path: Path | None = None) -> list[UniverseEntry]:
@@ -36,6 +37,7 @@ def load_universe(path: Path | None = None) -> list[UniverseEntry]:
                 asset_type=(row.get("asset_type") or "stock").strip(),
                 role=(row.get("role") or "candidate").strip(),
                 sector=(row.get("sector") or "").strip() or None,
+                name=(row.get("name") or "").strip() or None,
             )
     if len(entries) > MAX_UNIVERSE_SIZE:
         raise ValueError(

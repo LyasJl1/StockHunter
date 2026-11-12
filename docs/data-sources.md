@@ -19,9 +19,11 @@ n'avait pas d'accès réseau sortant vers ces API au moment de la phase 1.
 
 ## Couverture réelle avec ces quotas
 - Univers par défaut : 58 symboles (4 indices ETF, 12 ETF sectoriels, 42 actions liquides US).
-- Backfill initial : 1 appel Tiingo par symbole pour tout l'historique (+1 métadonnées) ≈ 116 appels → ~2,5 h
-  à 50 req/h (le job s'arrête proprement au quota et reprend au run suivant).
-- Mise à jour quotidienne : ~58 appels/jour (≈6 % du quota journalier).
+- 1 seul appel Tiingo par symbole (historique complet en une requête), 58 appels pour tout l'univers.
+- 50 req/h : le chargement initial et chaque mise à jour quotidienne se font en 2 passages espacés d'1 h
+  (le job s'arrête net sur un 429, sans retry, et le passage suivant reprend par les séries les plus anciennes).
+- Constaté au 1er run réel (12/11/2026) : Tiingo a renvoyé 429 avant notre compteur local de 50 —
+  le quota côté Tiingo fait foi.
 - Plafond logiciel : 400 symboles (marge sous la limite de 500 symboles/mois).
 
 ## Limites à traiter dans les phases suivantes

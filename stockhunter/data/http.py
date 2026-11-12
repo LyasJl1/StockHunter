@@ -62,6 +62,8 @@ class ProviderClient:
     quotas: list[QuotaWindow] = field(default_factory=list)
     timeout_s: float = 30.0
     max_retries: int = 4
+    # Codes HTTP qui signifient « quota de la fenêtre épuisé » : pas de retry (inutile et coûteux)
+    quota_status_codes: tuple[int, ...] = ()
     backoff_base_s: float = 1.0
     sleep: Callable[[float], None] = time.sleep
     transport: httpx.BaseTransport | None = None
@@ -167,6 +169,8 @@ class ProviderClient:
                     cache_file.write_text(json.dumps(data))
                 return data
 
+            if err is None and status in self.quota_status_codes:
+                raise QuotaExceeded(self.name, f"HTTP {status} : quota du fournisseur épuisé sur {endpoint}", status)
             retryable = err is not None or status in (429, 500, 502, 503, 504)
             if not retryable:
                 body = self._redact(resp.text[:300])

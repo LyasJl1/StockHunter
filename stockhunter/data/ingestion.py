@@ -91,6 +91,8 @@ def sync_universe(engine: Engine, ctx: JobContext, universe_file: Path | None = 
             inst.asset_type, inst.role, inst.is_active = e.asset_type, e.role, True
             if e.sector:
                 inst.sector = e.sector
+            if e.name:
+                inst.name = e.name
             info = ticker_map.get(e.symbol)
             if info:
                 inst.cik = info["cik"]
@@ -113,21 +115,19 @@ def ingest_prices(engine: Engine, ctx: JobContext, tiingo: TiingoProvider, histo
     src_id = sources[TiingoProvider.NAME]
     today = today or date.today()
 
-    for inst in _instruments(engine, symbols):
+    # Les séries jamais chargées ou les plus anciennes passent en premier : si le quota coupe le run,
+    # le suivant reprend là où l'on s'est arrêté.
+    todo = sorted(_instruments(engine, symbols), key=lambda i: (i.last_price_date is not None, i.last_price_date or today))
+    for inst in todo:
         try:
-            if inst.name is None or inst.first_price_date is None:
-                try:
-                    meta = tiingo.fetch_metadata(inst.symbol)
-                    with session_scope(engine) as s:
-                        db_inst = s.get(Instrument, inst.id)
-                        db_inst.name = db_inst.name or meta.get("name")
-                except NotFound:
-                    raise RuntimeError("symbole inconnu de Tiingo")
-
+            # 1 seul appel par symbole (pas d'appel métadonnées : nom = SEC pour les actions, CSV pour les ETF)
             incremental = (not full) and inst.last_price_date is not None
             start = (inst.last_price_date - timedelta(days=PRICE_OVERLAP_DAYS)) if incremental \
                 else today - timedelta(days=365 * history_years)
-            bars = tiingo.fetch_prices(inst.symbol, start)
+            try:
+                bars = tiingo.fetch_prices(inst.symbol, start)
+            except NotFound:
+                raise RuntimeError("symbole inconnu de Tiingo")
 
             # Un split ou un dividende dans la fenêtre récente modifie TOUS les prix ajustés passés :
             # on recharge alors l'historique complet pour garder une série ajustée cohérente.
