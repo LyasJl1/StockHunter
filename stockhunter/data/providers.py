@@ -316,6 +316,7 @@ FRED_SERIES: dict[str, str] = {
     "DFF": "Taux effectif des Fed Funds",
     "CPIAUCSL": "Indice des prix à la consommation (CPI-U)",
     "UNRATE": "Taux de chômage US",
+    "DEXUSEU": "Taux de change dollars US pour 1 euro",
 }
 
 

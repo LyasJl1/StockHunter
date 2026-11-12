@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="banner">Performance du portefeuille SIMULÉ, frais estimés inclus (10 pb par côté). Les résultats historiques (backtests) sont dans docs/validation.md : aucune stratégie n'y est validée.</div>
+<div class="grid g4">
+  <div class="card"><h2>Rendement simulé</h2><div class="kpi">{{ stats.rendement|pct if stats else 'N/D' }}</div><div class="sub">{{ stats.jours ~ ' séances' if stats else 'pas encore de position' }}</div></div>
+  <div class="card"><h2>SPY sur la période</h2><div class="kpi">{{ stats.spy|pct if stats else 'N/D' }}</div></div>
+  <div class="card"><h2>Drawdown maximal</h2><div class="kpi">{{ stats.drawdown_max|pct if stats else 'N/D' }}</div></div>
+  <div class="card"><h2>Trades clos</h2><div class="kpi">{{ pf.closed }}</div>
+    <div class="sub">gagnants {{ pf.win_rate|pct(0, false) }} · espérance {{ pf.avg_r|num }} R</div></div>
+</div>
+<div class="card" style="margin-top:16px"><h2>Valeur du portefeuille simulé vs SPY (base 100)</h2>
+{% if curve != '[]' %}<canvas id="eq" height="80"></canvas><h2 style="margin-top:16px">Drawdown</h2><canvas id="dd" height="40"></canvas>
+{% else %}<p class="muted">Aucune position ouverte pour l'instant : la courbe apparaîtra dès la première entrée simulée.</p>{% endif %}</div>
+<div class="card" style="margin-top:16px"><h2>Par stratégie (trades clos)</h2><table>
+<tr><th>Stratégie</th><th class="r">Trades</th><th class="r">Gagnants</th><th class="r">P&amp;L net</th><th class="r">Durée moyenne</th></tr>
+{% for r in by_strategy %}<tr><td>{{ r.strategie }}</td><td class="r">{{ r.trades }}</td><td class="r">{{ (r.gagnants / r.trades)|pct(0, false) }}</td>
+<td class="r {{ 'pos' if r.pnl>0 else 'neg' }}">{{ r.pnl|num(0) }} $</td><td class="r">{{ (r.jours / r.trades)|num(1) }} j</td></tr>
+{% else %}<tr><td colspan="5" class="muted">Aucun trade clos : moins de 10 trades ne permettent de rien conclure.</td></tr>{% endfor %}</table></div>
+<script>
+const c = {{ curve|safe }};
+if (c.length) {
+  const css = getComputedStyle(document.documentElement);
+  const e0 = c[0].equity, s0 = c.find(x => x.spy)?.spy;
+  let peak = -Infinity;
+  const dd = c.map(x => { peak = Math.max(peak, x.equity); return +(100 * (x.equity / peak - 1)).toFixed(2); });
+  new Chart(document.getElementById('eq'), {type: 'line', data: {labels: c.map(x => x.date), datasets: [
+    {label: 'Portefeuille simulé', data: c.map(x => +(100 * x.equity / e0).toFixed(2)), borderColor: css.getPropertyValue('--accent'), pointRadius: 0},
+    {label: 'SPY', data: c.map(x => x.spy ? +(100 * x.spy / s0).toFixed(2) : null), borderColor: css.getPropertyValue('--muted'), pointRadius: 0}]},
+    options: {animation: false, interaction: {mode: 'index', intersect: false}}});
+  new Chart(document.getElementById('dd'), {type: 'line', data: {labels: c.map(x => x.date), datasets: [
+    {label: 'Drawdown (%)', data: dd, borderColor: css.getPropertyValue('--neg'), pointRadius: 0, fill: true}]},
+    options: {animation: false, plugins: {legend: {display: false}}}});
+}
+</script>
+{% endblock %}

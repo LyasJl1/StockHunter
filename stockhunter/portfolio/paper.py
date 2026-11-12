@@ -254,3 +254,56 @@ def summary(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER) -> dict[str, Any]:
 def _initial_shares(s, t: PaperTrade) -> float:
     return s.scalar(select(PaperTradeEvent.shares).where(PaperTradeEvent.trade_id == t.id,
                                                           PaperTradeEvent.kind == "OPENED")) or 0.0
+
+
+def load_config(engine: Engine) -> PaperConfig:
+    """Paramètres du paper trading : valeurs par défaut, surchargées depuis la page Réglages (kv_store)."""
+    from stockhunter.db.models import KeyValue
+    with session_scope(engine) as s:
+        kv = s.get(KeyValue, "paper_config")
+        overrides = json.loads(kv.value) if kv else {}
+    allowed = {k: v for k, v in overrides.items() if k in PaperConfig.__dataclass_fields__}
+    return PaperConfig(**{**asdict(DEFAULT_PAPER), **allowed})
+
+
+def equity_curve(engine: Engine, cfg: PaperConfig | None = None) -> list[dict[str, Any]]:
+    """Valeur quotidienne du portefeuille simulé : capital + réalisé (net de frais) + latent aux clôtures."""
+    cfg = cfg or load_config(engine)
+    with session_scope(engine) as s:
+        trades = list(s.scalars(select(PaperTrade).where(PaperTrade.entry_date.is_not(None))))
+        if not trades:
+            return []
+        events = list(s.scalars(select(PaperTradeEvent).where(PaperTradeEvent.trade_id.in_([t.id for t in trades]))
+                                .order_by(PaperTradeEvent.event_date, PaperTradeEvent.id)))
+        start = min(t.entry_date for t in trades)
+        spy = s.scalar(select(Instrument.id).where(Instrument.symbol == "SPY"))
+        days = [d for (d,) in s.execute(select(PriceBar.bar_date).where(PriceBar.instrument_id == spy,
+                                                                         PriceBar.bar_date >= start)
+                                        .order_by(PriceBar.bar_date))]
+        closes: dict[int, dict[date, float]] = {}
+        for t in trades:
+            closes[t.id] = {d: c for d, c in s.execute(select(PriceBar.bar_date, PriceBar.close).where(
+                PriceBar.instrument_id == t.instrument_id, PriceBar.bar_date >= start))}
+        spy_close = {d: c for d, c in s.execute(select(PriceBar.bar_date, PriceBar.close).where(
+            PriceBar.instrument_id == spy, PriceBar.bar_date >= start))}
+    out = []
+    for d in days:
+        realized, mtm = 0.0, 0.0
+        for t in trades:
+            evs = [e for e in events if e.trade_id == t.id and e.event_date <= d]
+            held, entry, cost = 0.0, t.entry_price, 0.0
+            for ev in evs:
+                if ev.kind == "OPENED":
+                    held = ev.shares
+                    cost += ev.price * ev.shares * cfg.cost_bps / 1e4
+                elif ev.kind in ("TP1", "CLOSED") and ev.shares:
+                    realized += (ev.price - entry) * ev.shares
+                    cost += ev.price * ev.shares * cfg.cost_bps / 1e4
+                    held -= ev.shares
+            realized -= cost
+            if held > 1e-9:
+                px = closes[t.id].get(d)
+                if px is not None:
+                    mtm += (px - entry) * held
+        out.append({"date": d.isoformat(), "equity": cfg.capital + realized + mtm, "spy": spy_close.get(d)})
+    return out

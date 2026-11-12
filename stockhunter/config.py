@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     telegram_max_per_run: int = 15          # anti-spam : au-delà, les messages attendent le run suivant
     report_morning_hour_paris: int = 8      # rapport du matin, heure de Paris (changements d'heure gérés)
 
+    dashboard_password_hash: SecretStr | None = None   # hachage scrypt (stockhunter dashboard hash-password)
+    dashboard_secret: SecretStr | None = None          # clé de signature des sessions (32+ caractères aléatoires)
+
     limits: ProviderLimits = Field(default_factory=ProviderLimits)
 
     def provider_status(self) -> dict[str, str]:

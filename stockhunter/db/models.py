@@ -472,3 +472,22 @@ class KeyValue(Base):
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+# =========================================================================== Phase 5 : portefeuille réel (saisie manuelle)
+class ManualTransaction(Base):
+    """Opération de TON portefeuille réel, saisie à la main. Jamais mélangée avec le paper trading."""
+
+    __tablename__ = "manual_transactions"
+    __table_args__ = (Index("ix_manual_symbol", "symbol", "trade_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20))
+    trade_date: Mapped[date] = mapped_column(Date)
+    kind: Mapped[str] = mapped_column(String(10))          # BUY | SELL | DIVIDEND
+    quantity: Mapped[float] = mapped_column(Float, default=0.0)
+    price: Mapped[float] = mapped_column(Float, default=0.0)   # prix unitaire, ou montant total pour un dividende
+    fees: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    note: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

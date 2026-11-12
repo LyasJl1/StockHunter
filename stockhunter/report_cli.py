@@ -281,8 +281,9 @@ def cmd_research(settings, engine, args) -> int:
 def cmd_paper(settings, engine, args) -> int:
     from stockhunter.portfolio import paper
     if args.action == "run":
-        created = paper.plan_from_scan(engine)
-        counts = paper.process(engine)
+        cfg = paper.load_config(engine)
+        created = paper.plan_from_scan(engine, cfg=cfg)
+        counts = paper.process(engine, cfg)
         print(f"Plans créés : {len(created)} ; " + ", ".join(f"{k} {v}" for k, v in counts.items()))
     sm = paper.summary(engine)
     wr = "N/D" if sm["win_rate"] is None else f"{sm['win_rate']:.0%}"
@@ -321,6 +322,31 @@ def cmd_notify(settings, engine, args) -> int:
     return 1 if out.get("echecs") else 0
 
 
+def cmd_dashboard(settings, engine, args) -> int:
+    if args.action == "hash-password":
+        import getpass
+        import secrets as _secrets
+
+        from stockhunter.dashboard.auth import hash_password
+        pw = getpass.getpass("Mot de passe du dashboard (12 caractères min.) : ")
+        if len(pw) < 12:
+            print("Trop court : 12 caractères minimum.")
+            return 1
+        if pw != getpass.getpass("Confirmer : "):
+            print("Les deux saisies diffèrent.")
+            return 1
+        print("\nÀ placer dans les variables d'environnement (jamais dans le code) :")
+        print(f"SH_DASHBOARD_PASSWORD_HASH={hash_password(pw)}")
+        print(f"SH_DASHBOARD_SECRET={_secrets.token_urlsafe(48)}")
+        return 0
+    import uvicorn
+
+    from stockhunter.dashboard.app import create_app
+    app = create_app(engine, settings, secure_cookies=not args.insecure_cookies)
+    uvicorn.run(app, host=args.host, port=args.port, proxy_headers=True, forwarded_allow_ips="*")
+    return 0
+
+
 def add_parsers(sub) -> dict:
     sc = sub.add_parser("scan", help="calcule et enregistre le classement")
     sc.add_argument("--as-of", help="date d'analyse AAAA-MM-JJ (séance clôturée), défaut : dernière séance")
@@ -355,5 +381,11 @@ def add_parsers(sub) -> dict:
     nt.add_argument("kind", choices=["morning", "evening"])
     nt.add_argument("--force", action="store_true", help="ignorer l'heure de Paris prévue")
     nt.add_argument("--preview", action="store_true", help="afficher le rapport sans rien envoyer")
+    db = sub.add_parser("dashboard", help="interface web")
+    db.add_argument("action", choices=["serve", "hash-password"])
+    db.add_argument("--host", default="127.0.0.1")
+    db.add_argument("--port", type=int, default=8000)
+    db.add_argument("--insecure-cookies", action="store_true", help="HTTP local uniquement (pas de HTTPS)")
     return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "validate": cmd_validate, "market": cmd_market,
-            "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify}
+            "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
+            "dashboard": cmd_dashboard}

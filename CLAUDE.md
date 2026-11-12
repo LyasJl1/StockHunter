@@ -42,7 +42,9 @@ Méthode détaillée : `docs/scoring.md`. Protocole de backtest et résultats : 
   portfolio/paper.py   Trade Decision Engine simulé : plan (R = 2×ATR, TP1 1,5 R, TP2 3 R), suivi, événements
   reports/daily.py     rapport quotidien (12 sections), uniquement à partir de la base, sans LLM
   notifications/       Telegram : file persistante, déduplication, retries, anti-spam, commandes
-Phases suivantes (à créer) : `dashboard/` (phase 5), actualités (6), déploiement (7). Ancien plan : `risk/ portfolio/ notifications/ reports/ dashboard/`.
+  portfolio/manual.py  portefeuille RÉEL saisi à la main (prix moyen, P&L, dividendes, EUR/USD daté)
+  dashboard/           FastAPI + Jinja + HTMX + Chart.js (scripts embarqués), auth scrypt, CSRF, CSP
+Phases suivantes : actualités et synthèses (6), déploiement (7), audit final (8). Ancien plan : `risk/ portfolio/ notifications/ reports/ dashboard/`.
 Cycle d'une stratégie : RESEARCH → BACKTEST → OUT-OF-SAMPLE → PAPER → PROMOTED.
 
 ## Commandes
@@ -64,6 +66,8 @@ stockhunter research broad [--out f.md]   # étude pré-enregistrée (docs/resea
 stockhunter paper run|status        # paper trading : plans des signaux READY, suivi, clôtures (simulation)
 stockhunter forward record|report   # test prospectif des facteurs pré-enregistrés (depuis le 13/11/2026)
 stockhunter notify evening|morning [--preview] [--force]   # rapport quotidien + alertes Telegram
+stockhunter dashboard hash-password # génère SH_DASHBOARD_PASSWORD_HASH et SH_DASHBOARD_SECRET
+stockhunter dashboard serve [--port 8000] [--insecure-cookies]   # interface web (HTTPS en production)
 pytest -m "not live"                # tests hors réseau
 pytest -m live                      # tests réels (clés requises)
 ```
