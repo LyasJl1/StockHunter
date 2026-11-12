@@ -1,7 +1,6 @@
 """Phase 6 : catalyseurs, actualités, synthèse sourcée, alertes. Données SYNTHÉTIQUES (symboles ZZ*)."""
 
-import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 
