@@ -60,17 +60,23 @@ jobs:
       - name: Contrôles qualité
         run: stockhunter quality || echo "::warning::anomalies critiques détectées"
 
+      - name: Scanner (classement multicritère)
+        # Ne score que si toutes les séries de prix sont à jour (sinon le 2e passage du soir s'en charge)
+        run: stockhunter scan --if-new --require-fresh || echo "::warning::scan non exécuté (voir le log)"
+
       - name: Rapport
         if: always()
         run: |
           {
-            echo '## StockHunter — état des données'
+            echo '## StockHunter — classement'
+            echo '```'
+            stockhunter top -n 15 || true
+            echo '```'
+            echo '## État des données'
             echo '```'
             stockhunter status
             echo
             stockhunter prices SPY -n 5 || true
-            echo
-            stockhunter prices NVDA -n 5 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           stockhunter status

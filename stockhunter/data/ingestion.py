@@ -94,6 +94,7 @@ def sync_universe(engine: Engine, ctx: JobContext, universe_file: Path | None = 
                 inst.sector = e.sector
             if e.name:
                 inst.name = e.name
+            inst.sector_etf, inst.industry_etf = e.sector_etf, e.industry_etf
             info = ticker_map.get(e.symbol)
             if info:
                 inst.cik = info["cik"]

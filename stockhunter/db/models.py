@@ -55,6 +55,8 @@ class Instrument(Base):
     cik: Mapped[str | None] = mapped_column(String(10), index=True)
     sector: Mapped[str | None] = mapped_column(String(100))
     industry: Mapped[str | None] = mapped_column(String(150))
+    sector_etf: Mapped[str | None] = mapped_column(String(20))
+    industry_etf: Mapped[str | None] = mapped_column(String(20))
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     first_price_date: Mapped[date | None] = mapped_column(Date)
@@ -244,3 +246,78 @@ class DataAnomaly(Base):
     detail: Mapped[str] = mapped_column(Text)
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# =========================================================================== Phase 2 : scanner
+class StrategyVersion(Base):
+    """Version figée d'une méthode de scoring : poids, seuils, paramètres. Une modification = nouvelle version.
+
+    stage : RESEARCH -> BACKTEST -> OUT_OF_SAMPLE -> PAPER -> PROMOTED (aucune promotion sans validation).
+    """
+
+    __tablename__ = "strategy_versions"
+    __table_args__ = (UniqueConstraint("name", "version", name="uq_strategy_version"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(60))
+    version: Mapped[str] = mapped_column(String(30))
+    stage: Mapped[str] = mapped_column(String(20), default="RESEARCH")
+    params_json: Mapped[str] = mapped_column(Text)
+    params_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ScanRun(Base):
+    __tablename__ = "scan_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_version_id: Mapped[int] = mapped_column(ForeignKey("strategy_versions.id"))
+    as_of: Mapped[date] = mapped_column(Date, index=True)  # dernière séance prise en compte
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    universe_size: Mapped[int] = mapped_column(Integer)
+    scored: Mapped[int] = mapped_column(Integer)
+    regime_json: Mapped[str] = mapped_column(Text)
+    sectors_json: Mapped[str] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class Score(Base):
+    """Résultat d'une action pour un scan. Jamais modifié après insertion (historique vérifiable)."""
+
+    __tablename__ = "scores"
+    __table_args__ = (
+        UniqueConstraint("scan_run_id", "instrument_id", name="uq_score"),
+        Index("ix_score_instr", "instrument_id", "as_of"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id", ondelete="CASCADE"))
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"))
+    as_of: Mapped[date] = mapped_column(Date)
+    price_date: Mapped[date | None] = mapped_column(Date)
+    close: Mapped[float | None] = mapped_column(Float)
+    total: Mapped[float | None] = mapped_column(Float)
+    confidence: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    status_reason: Mapped[str] = mapped_column(Text)
+    subscores_json: Mapped[str] = mapped_column(Text)
+    strategies_json: Mapped[str] = mapped_column(Text)
+    reasons_pos_json: Mapped[str] = mapped_column(Text)
+    reasons_neg_json: Mapped[str] = mapped_column(Text)
+    metrics_json: Mapped[str] = mapped_column(Text)
+    sources_json: Mapped[str] = mapped_column(Text)
+    rank: Mapped[int | None] = mapped_column(Integer)
+
+
+class StatusChange(Base):
+    __tablename__ = "status_changes"
+    __table_args__ = (Index("ix_status_instr", "instrument_id", "changed_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"))
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id", ondelete="CASCADE"))
+    as_of: Mapped[date] = mapped_column(Date)
+    from_status: Mapped[str | None] = mapped_column(String(20))
+    to_status: Mapped[str] = mapped_column(String(20))
+    reason: Mapped[str] = mapped_column(Text)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

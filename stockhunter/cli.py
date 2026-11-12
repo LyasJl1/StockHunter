@@ -8,6 +8,9 @@
   stockhunter prices SYMBOL [-n 10]   consulter les barres stockées (datées, jamais présentées comme live)
   stockhunter verify-sources          appel réel et minimal à chaque API configurée
   stockhunter prune [--days 90]       rétention du journal d'appels API et des jobs
+  stockhunter scan [--as-of DATE]     classement multicritère (enregistré, jamais modifié)
+  stockhunter top [-n 10] [--all]     dernier classement
+  stockhunter explain SYMBOL          fiche explicative : sous-scores, raisons, sources, historique
 """
 
 from __future__ import annotations
@@ -212,7 +215,7 @@ def cmd_prune(settings: Settings, engine, args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="stockhunter", description="StockHunter AI — phase 1 : données")
+    p = argparse.ArgumentParser(prog="stockhunter", description="StockHunter AI — données et scanner")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init-db")
@@ -229,6 +232,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("verify-sources")
     pn = sub.add_parser("prune")
     pn.add_argument("--days", type=int, default=90)
+    from stockhunter.report_cli import add_parsers
+    p.set_defaults(_extra=add_parsers(sub))
     return p
 
 
@@ -246,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
     handlers = {
         "sync-universe": cmd_sync_universe, "ingest": cmd_ingest, "quality": cmd_quality,
         "status": cmd_status, "prices": cmd_prices, "verify-sources": cmd_verify_sources, "prune": cmd_prune,
+        **args._extra,
     }
     return handlers[args.cmd](settings, engine, args)
 

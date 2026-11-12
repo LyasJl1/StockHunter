@@ -15,7 +15,7 @@ Moteur autonome de recherche, d'analyse, de validation et de suivi d'opportunit�
 9. Aucune ressource payante sans accord explicite d'Ilias.
 10. Calculs (indicateurs, scores, risques, backtests) = code déterministe. LLM réservé à la synthèse de texte.
 
-## Architecture (phase 1 livrée)
+## Architecture (phases 1 et 2 livrées)
 ```
 stockhunter/
   config.py            Settings (env SH_*) + quotas documentés des plans gratuits
@@ -27,10 +27,16 @@ stockhunter/
   data/quality.py      contrôles qualité -> table data_anomalies
   data/calendar.py     calendrier NYSE
   jobs/runner.py       verrou en base + journal JobRun
-  universe/            univers suivi (CSV)
+  universe/            univers suivi (CSV) + ETF sectoriel GICS de chaque action
+  analytics/           indicateurs techniques et fondamentaux point-in-time (calcul pur)
+  scoring/config.py    poids, seuils, version (hash vérifié : changer un paramètre = nouvelle version)
+  scoring/engine.py    régime, sous-scores, familles de signaux A-F, statuts (calcul pur, sans base)
+  scan.py              chargement point-in-time, enregistrement immuable, historique des statuts
+  report_cli.py        commandes scan / top / explain
   cli.py               point d'entrée `stockhunter`
 ```
-Phases suivantes (à créer) : `strategies/ scoring/ validation/ risk/ portfolio/ notifications/ reports/ dashboard/`.
+Méthode détaillée : `docs/scoring.md`.
+Phases suivantes (à créer) : `validation/ risk/ portfolio/ notifications/ reports/ dashboard/`.
 Cycle d'une stratégie : RESEARCH → BACKTEST → OUT-OF-SAMPLE → PAPER → PROMOTED.
 
 ## Commandes
@@ -43,9 +49,17 @@ stockhunter quality
 stockhunter status
 stockhunter prices AAPL -n 10
 stockhunter verify-sources          # appels réels
+stockhunter scan [--as-of AAAA-MM-JJ] [--if-new] [--require-fresh]
+stockhunter top [-n 10] [--all]
+stockhunter explain NVDA
 pytest -m "not live"                # tests hors réseau
 pytest -m live                      # tests réels (clés requises)
 ```
+
+## Règles du scoring
+- Un scan est inséré, jamais modifié. Ne jamais réécrire `scores` ou `status_changes`.
+- Toute nouvelle donnée utilisée par le scoring doit être filtrée `<= as_of` ; ajouter un cas à `test_no_look_ahead`.
+- Modifier `scoring/config.py` impose d'incrémenter `SCORING_VERSION` (le scan refuse sinon).
 
 ## Conventions
 - Python 3.12+, typage, fonctions `parse_*` pures et testées séparément des appels réseau.

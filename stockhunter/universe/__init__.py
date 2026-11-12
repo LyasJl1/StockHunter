@@ -22,6 +22,8 @@ class UniverseEntry:
     role: str
     sector: str | None
     name: str | None = None
+    sector_etf: str | None = None    # ETF Select Sector correspondant (classification GICS)
+    industry_etf: str | None = None  # ETF d'industrie optionnel (ex. SMH pour les semi-conducteurs)
 
 
 def load_universe(path: Path | None = None) -> list[UniverseEntry]:
@@ -38,7 +40,14 @@ def load_universe(path: Path | None = None) -> list[UniverseEntry]:
                 role=(row.get("role") or "candidate").strip(),
                 sector=(row.get("sector") or "").strip() or None,
                 name=(row.get("name") or "").strip() or None,
+                sector_etf=(row.get("sector_etf") or "").strip().upper() or None,
+                industry_etf=(row.get("industry_etf") or "").strip().upper() or None,
             )
+    known = set(entries)
+    for e in entries.values():
+        for ref in (e.sector_etf, e.industry_etf):
+            if ref and ref not in known:
+                raise ValueError(f"{e.symbol} : ETF de référence {ref} absent de l'univers")
     if len(entries) > MAX_UNIVERSE_SIZE:
         raise ValueError(
             f"Univers de {len(entries)} symboles > {MAX_UNIVERSE_SIZE} : incompatible avec le quota Tiingo Free."
