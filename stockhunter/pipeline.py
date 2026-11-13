@@ -39,6 +39,7 @@ class Step:
 
 
 NIGHTLY: tuple[Step, ...] = (
+    Step("entretien", "0 base", ("db", "tune"), False),
     Step("univers", "1 collecte", ("sync-universe",), False),
     Step("ingestion", "1 collecte", ("ingest", "all"), True),
     Step("marche_large", "1 collecte", ("market", "sync", "--max-calls", "4"), False),

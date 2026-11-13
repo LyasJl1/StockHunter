@@ -93,5 +93,5 @@ Ce tableau ne valide rien : il décrit le comportement des règles sur un signal
 ## Suite (expériences prospectives, sans ré-optimisation)
 1. Paniers hebdomadaires figés pour V2, V3, V4, V9 et MF, ajoutés au test prospectif existant (H1–H7, C).
 2. Réévaluation à 26 et 52 semaines de données prospectives, avec le même seuil.
-3. Historique long (≥ 10 ans) pour ~440 titres via le quota gratuit Tiingo : à décider par Ilias (voir le rapport
+3. Historique long (≥ 10 ans) pour quelques centaines de titres via le plan gratuit Tiingo (limites à vérifier) : à décider par Ilias (voir le rapport
    v3, « prochaines expériences »). C'est le seul moyen gratuit d'obtenir plusieurs régimes de marché.

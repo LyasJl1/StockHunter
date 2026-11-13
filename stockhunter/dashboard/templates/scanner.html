@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="tabs" style="margin-bottom:14px"><a class="on" href="/scanner">Univers large ({{ v.universe if v else '—' }} titres)</a><a href="/opportunities">Univers suivi (42 actions, score détaillé)</a></div>
+{% if v %}
+<div class="banner">{{ v.conclusion }} Le rang classe les titres entre eux ; la « confiance » mesure la qualité des données ; ni l'un ni l'autre n'est une probabilité de gain.</div>
+<div class="grid g4" style="margin-bottom:16px">
+  <div class="card"><h2>Séance analysée</h2><div class="kpi">{{ v.as_of|d }}</div><div class="sub">clôtures, pas de cours en direct · moteur {{ v.version }}</div></div>
+  <div class="card"><h2>Marché</h2><div class="kpi {{ 'neg' if v.market.regime == 'DÉFAVORABLE' else 'pos' if v.market.regime == 'FAVORABLE' else '' }}">{{ v.market.regime }}</div><div class="sub">{{ v.market.motif_regime }}</div></div>
+  <div class="card"><h2>Univers négociable</h2><div class="kpi">{{ v.universe }}</div><div class="sub">actions US liquides (≥ 5 $, ≥ 2 M$ échangés/jour), recalculé chaque jour</div></div>
+  <div class="card"><h2>Configurations relevées</h2><div class="kpi">{{ v.n }}</div><div class="sub">aucun nombre imposé : une catégorie peut être vide</div></div>
+</div>
+<form class="filters" hx-get="/scanner" hx-target="#tbl" hx-trigger="change, keyup changed delay:300ms from:input">
+  <select name="d">{% for d in v.dates %}<option value="{{ d }}" {{ 'selected' if d == v.as_of }}>{{ d|d }}</option>{% endfor %}</select>
+  <select name="category"><option value="">Toutes catégories</option>{% for c in v.categories %}<option value="{{ c.key }}" {{ 'selected' if f.category == c.key }}>{{ c.label }}</option>{% endfor %}</select>
+  <select name="tier"><option value="">Toutes tailles</option>{% for t, l in [('grande', 'Grandes / très liquides'), ('moyenne', 'Moyennes'), ('petite', 'Petites / moins liquides')] %}<option value="{{ t }}" {{ 'selected' if f.tier == t }}>{{ l }}</option>{% endfor %}</select>
+  <input name="q" placeholder="Ticker ou société" value="{{ f.q }}">
+  <input name="min_conf" placeholder="Confiance min. (0-1)" size="16" value="{{ f.min_conf }}">
+</form>
+{% endif %}
+<div id="tbl">{% include "_scanner_table.html" %}</div>
+{% endblock %}

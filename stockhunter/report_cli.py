@@ -64,7 +64,7 @@ def cmd_scan(settings, engine, args) -> int:
                 if stale:
                     print(f"Scan reporté : {len(stale)} série(s) de prix pas à jour au {target} "
                           f"({', '.join(stale[:10])}{'…' if len(stale) > 10 else ''}).")
-                    return 0
+                    return 2          # partiel attendu : le passage suivant terminera (quota horaire des prix)
             if args.if_new and (prev := existing_scan(engine, target)):
                 print(f"Scan déjà réalisé pour le {target} (#{prev}) : rien à faire.")
                 return 0
@@ -305,7 +305,17 @@ def cmd_forward(settings, engine, args) -> int:
     try:
         if args.action == "record":
             print(f"Test prospectif : {forward.record(engine, st)} titre(s) figé(s) dans les paniers.")
-        print(forward.render(forward.report(engine, st)))
+        rep = forward.report(engine, st)
+        # résultat enregistré pour le dashboard (le serveur web n'a pas les données de marché complètes)
+        from stockhunter.db.models import KeyValue
+        payload = json.dumps({**rep, "libelles": forward.labels(), "genere_le": date.today().isoformat()}, ensure_ascii=False)
+        with session_scope(engine) as s:
+            kv = s.get(KeyValue, "forward_report")
+            if kv is None:
+                s.add(KeyValue(key="forward_report", value=payload))
+            else:
+                kv.value = payload
+        print(forward.render(rep))
     except RuntimeError as exc:
         print(f"IGNORÉ : {exc}")
         return 2
@@ -461,8 +471,13 @@ def cmd_lab(settings, engine, args) -> int:
     from stockhunter.lab.run import render, run_program
     from stockhunter.market.store import MarketStore
     end = date.fromisoformat(args.end) if args.end else None
-    res = run_program(load_panel(engine, MarketStore(settings.market_dir), end))
-    reg = registry.record_run(registry.load(), _json.loads(_json.dumps(res, default=str)))
+    reg0 = registry.load()
+    res = run_program(load_panel(engine, MarketStore(settings.market_dir), end),
+                      holdout_consulted=registry.holdout_consulted(reg0))
+    reg = registry.record_run(reg0, _json.loads(_json.dumps(res, default=str)))
+    registry.save(reg)        # trace locale ; le registre versionné est mis à jour par commit à partir de ce résultat
+    if any("holdout" in r for r in res["facteurs"].values()):
+        print("ATTENTION : période réservée consultée lors de cette exécution — à consigner dans le registre versionné.")
     text = render(res, registry.family_pvalues(reg))
     if args.out:
         Path(args.out).write_text(text)

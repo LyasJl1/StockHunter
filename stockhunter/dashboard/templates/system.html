@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+{% set st = {'ok': 'OK', 'warning': 'partiel', 'failed': 'ÉCHEC'} %}
+{% if v.stale.stale %}<div class="banner" style="border-color:var(--neg)">⚠️ Données en retard : dernière clôture {{ v.last_price|d }}, séance attendue {{ v.stale.expected|d }}.</div>{% endif %}
+<div class="grid g4">
+  <div class="card"><h2>Chaîne nocturne</h2>{% if v.pipeline %}<div class="kpi {{ 'neg' if v.pipeline.status == 'failed' else 'pos' if v.pipeline.status == 'success' else '' }}">{{ {'success': 'OK', 'partial': 'Partielle', 'failed': 'ÉCHEC'}[v.pipeline.status] }}</div><div class="sub">lancée le {{ v.pipeline.started[:16]|replace('T', ' ') }} UTC{{ '' if v.pipeline.final else ' · en cours' }}</div>{% else %}<div class="kpi">—</div><div class="sub">aucune exécution enregistrée</div>{% endif %}</div>
+  <div class="card"><h2>Fraîcheur</h2><div class="kpi {{ 'neg' if v.stale.stale else 'pos' }}">{{ v.last_price|d }}</div><div class="sub">dernière clôture en base · découverte : {{ v.last_discovery|d }}</div></div>
+  <div class="card"><h2>Base de données</h2><div class="kpi {{ 'neg' if (v.db_share or 0) > 0.8 }}">{{ ((v.db.bytes or 0) / 1048576)|num(0) }} Mo</div><div class="sub">{{ v.db.dialect }} {{ v.db.version or '' }} · {{ ((v.db_share or 0) * 100)|num(0) }} % du volume gratuit (500 Mo){% if not v.db.ok %} · <span class="neg">{{ v.db.error }}</span>{% endif %}</div></div>
+  <div class="card"><h2>Telegram</h2><div class="kpi">{{ v.notif.get('SENT', 0) }}</div><div class="sub">envoyés sur 7 jours · {{ v.notif.get('FAILED', 0) }} échec(s) · {{ v.notif.get('PENDING', 0) }} en attente<br>lecteur des commandes : {% if v.reader %}{{ v.reader.owner }}{{ '' if v.reader.active else ' (inactif)' }}{% else %}aucun{% endif %}</div></div>
+</div>
+<div class="grid g2" style="margin-top:16px">
+  <div class="card"><h2>Étapes de la dernière chaîne nocturne</h2>
+    {% if v.pipeline %}<table><tr><th>Phase</th><th>Étape</th><th>Résultat</th><th class="r">Durée</th></tr>
+    {% for s in v.pipeline.steps %}<tr><td class="sub">{{ s.stage }}</td><td>{{ s.name }}{% if s.critical %} <span class="sub">(critique)</span>{% endif %}</td>
+      <td class="{{ 'neg' if s.status == 'failed' else 'pos' if s.status == 'ok' else '' }}">{{ st[s.status] }}{% if s.error %}<div class="sub">{{ s.error }}</div>{% endif %}</td><td class="r">{{ s.seconds|num(0) }} s</td></tr>{% endfor %}</table>
+    <p class="sub">Une étape critique en échec fait échouer le workflow GitHub (plus aucun échec masqué) et déclenche une alerte Telegram.</p>
+    {% else %}<p class="muted">Disponible après la première exécution de la chaîne v3.</p>{% endif %}</div>
+  <div class="card"><h2>Quotas des sources (plans gratuits)</h2>
+    <table><tr><th>Source</th><th>Fenêtre</th><th class="r">Utilisé</th><th class="r">Limite</th><th class="r">Appels 24 h</th><th class="r">Erreurs 24 h</th></tr>
+    {% for q in v.quotas %}<tr><td>{{ q.provider }}</td><td class="sub">{{ q.window }}</td><td class="r {{ 'neg' if q.cap and q.used >= q.cap }}">{{ q.used }}</td><td class="r">{{ q.cap or 'sans quota dur' }}</td><td class="r">{{ q.day }}</td><td class="r {{ 'neg' if q.errors }}">{{ q.errors }}</td></tr>{% endfor %}</table>
+    <p class="sub">Compté dans le journal des appels (hors réponses servies par le cache). Le client attend ou s'arrête proprement avant de dépasser une limite.</p></div>
+</div>
+<div class="card" style="margin-top:16px"><h2>Traitements (30 jours)</h2>
+  <table><tr><th>Traitement</th><th>Dernier état</th><th>Dernière exécution (Paris)</th><th>Dernier succès</th><th class="r">Exécutions</th><th class="r">Échecs</th><th class="r">Fiabilité</th></tr>
+  {% for name, j in v.jobs|dictsort %}<tr><td>{{ name }}</td><td class="{{ 'neg' if j.last == 'failed' }}">{{ j.last }}{% if j.detail %}<div class="sub">{{ j.detail[:160] }}</div>{% endif %}</td><td>{{ j.last_at|t }}</td><td>{{ j.ok_at|t if j.ok_at else 'jamais' }}</td>
+    <td class="r">{{ j.runs }}</td><td class="r">{{ j.failed }}</td><td class="r">{{ ((1 - j.failed / j.runs) * 100)|num(0) }} %</td></tr>
+  {% else %}<tr><td class="muted">Aucune exécution.</td></tr>{% endfor %}</table></div>
+<div class="grid g2" style="margin-top:16px">
+  <div class="card"><h2>Anomalies de données ouvertes</h2><table>
+    {% for sev in ('critical', 'warning', 'info') %}<tr><td>{{ {'critical': 'Critiques', 'warning': 'Avertissements', 'info': 'Informations'}[sev] }}</td><td class="r {{ 'neg' if sev == 'critical' and v.anomalies.get(sev) }}">{{ v.anomalies.get(sev, 0) }}</td></tr>{% endfor %}</table>
+    {% if v.failed_notif %}<h2 style="margin-top:14px">Derniers envois Telegram en échec</h2><table>{% for n in v.failed_notif %}<tr><td class="sub">{{ n.at|t }}</td><td>{{ n.kind }}</td><td class="sub">{{ (n.error or '')[:120] }}</td></tr>{% endfor %}</table>{% endif %}</div>
+  <div class="card"><h2>Plus grosses tables</h2>
+    {% if v.db.tables %}<table><tr><th>Table</th><th class="r">Lignes</th><th class="r">Taille</th></tr>{% for t in v.db.tables %}<tr><td>{{ t.name }}</td><td class="r">{{ t.rows }}</td><td class="r">{{ (t.bytes / 1048576)|num(1) }} Mo</td></tr>{% endfor %}</table>
+    {% else %}<p class="muted">Détail disponible sur PostgreSQL.</p>{% endif %}
+    <p class="sub">Le crédit gratuit Railway (1 $/mois) ne couvre pas un mois complet : le site peut s'arrêter en fin de mois ; la collecte et Telegram (GitHub Actions) continuent.</p></div>
+</div>
+{% endblock %}

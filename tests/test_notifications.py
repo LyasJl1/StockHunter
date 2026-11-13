@@ -73,7 +73,8 @@ def test_not_configured_messages_are_skipped_not_queued_forever(engine, settings
         assert {n.status for n in s.scalars(select(NotificationLog))} == {"SKIPPED"}
 
 
-@pytest.mark.parametrize("utc_hour,month,expected", [(7, 1, True), (6, 1, False), (6, 7, True), (7, 7, False)])
+@pytest.mark.parametrize("utc_hour,month,expected", [(7, 1, True), (6, 1, False), (6, 7, True), (5, 7, False),
+                                                     (9, 1, True), (11, 1, False), (10, 7, False)])   # retard GitHub toléré jusqu'à midi
 def test_morning_report_follows_paris_time_and_dst(engine, settings, utc_hour, month, expected):
     setup(engine)
     now = datetime(2026, month, 14 if month == 1 else 15, utc_hour, 0, tzinfo=timezone.utc)   # mercredis

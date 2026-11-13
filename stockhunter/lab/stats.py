@@ -42,19 +42,20 @@ def block_bootstrap_ci(x: pd.Series, block: int, n: int = 2000, seed: int = 2026
     return float(lo), float(hi)
 
 
-def holm(pvals: dict[str, float]) -> dict[str, float]:
+def holm(pvals: dict[str, float], m: int | None = None) -> dict[str, float]:
+    """`m` = taille de la famille entière (tests sans p-valeur compris) ; défaut : nombre de p-valeurs."""
     items = sorted(((k, p) for k, p in pvals.items() if p is not None and not math.isnan(p)), key=lambda kv: kv[1])
-    m, out, running = len(items), {}, 0.0
+    m, out, running = max(m or 0, len(items)), {}, 0.0
     for i, (k, p) in enumerate(items):
         running = max(running, min(1.0, (m - i) * p))
         out[k] = running
     return out
 
 
-def benjamini_hochberg(pvals: dict[str, float]) -> dict[str, float]:
+def benjamini_hochberg(pvals: dict[str, float], m: int | None = None) -> dict[str, float]:
     items = sorted(((k, p) for k, p in pvals.items() if p is not None and not math.isnan(p)), key=lambda kv: kv[1])
-    m, out, running = len(items), {}, 1.0
-    for i in range(m - 1, -1, -1):
+    m, out, running = max(m or 0, len(items)), {}, 1.0
+    for i in range(len(items) - 1, -1, -1):
         k, p = items[i]
         running = min(running, p * m / (i + 1))
         out[k] = running

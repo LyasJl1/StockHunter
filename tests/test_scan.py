@@ -150,7 +150,7 @@ def test_cli_scan_guards(engine, settings, monkeypatch, capsys):
     monkeypatch.setenv("SH_DATABASE_URL", settings.database_url)
     get_settings.cache_clear()
     try:
-        assert cli.main(["scan", "--require-fresh"]) == 0
+        assert cli.main(["scan", "--require-fresh"]) == 2   # partiel attendu, visible dans le bilan de la chaîne
         assert "Scan reporté : 1 série(s)" in capsys.readouterr().out
         assert cli.main(["scan", "--if-new"]) == 0
         assert cli.main(["scan", "--if-new"]) == 0

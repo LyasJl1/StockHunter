@@ -16,6 +16,7 @@ Hypothèses, limitées à ce qu'une barre journalière permet d'observer :
 - Glissement (slippage) appliqué dans le sens défavorable aux ordres au marché et aux stops ; aucun sur les
   ordres limites (objectifs). Frais proportionnels sur chaque exécution.
 - Split : quantités et niveaux par action ajustés le jour du split (la barre de ce jour est déjà post-split).
+- Position d'une seule action : TP1 vend la totalité (on ne fractionne pas une action).
 """
 
 from __future__ import annotations

@@ -17,7 +17,9 @@ from stockhunter.lab.stats import newey_west_tstat
 FEATURES = {**PRIOR_SIGNS, "V2": 1, "V3": 1, "V9": -1}
 HORIZON, PURGE, MIN_TRAIN_DATES, MIN_FEATURES = 20, 5, 12, 7
 RIDGE_ALPHA = 10.0
-GBM_PARAMS = {"max_depth": 3, "max_iter": 100, "learning_rate": 0.05, "random_state": 0}
+# early_stopping=False : sinon scikit-learn arrête avant 100 arbres au-delà de 10 000 lignes (écart au protocole
+# relevé par la revue indépendante du 13/11/2026 ; l'exécution du 12/11 a tourné avec l'arrêt anticipé).
+GBM_PARAMS = {"max_depth": 3, "max_iter": 100, "learning_rate": 0.05, "random_state": 0, "early_stopping": False}
 
 
 def build_dataset(facs: dict, mask: pd.DataFrame, fwd20: pd.DataFrame, dates: pd.DatetimeIndex):

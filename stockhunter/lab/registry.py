@@ -34,12 +34,20 @@ def family_pvalues(reg: dict) -> dict[str, dict]:
         t, n = e.get("t"), e.get("dates")
         if t is not None and n and n > 1:
             raw[e["id"]] = t_sf(t, n - 1)
-    h, bh = holm(raw), benjamini_hochberg(raw)
+    m = len(tests(reg))                      # famille entière, y compris les tests sans statistique
+    h, bh = holm(raw, m), benjamini_hochberg(raw, m)
     return {k: {"p": raw[k], "holm": h[k], "bh": bh[k]} for k in raw}
 
 
+def holdout_consulted(reg: dict) -> frozenset[str]:
+    return frozenset(e["id"] for e in reg["experiences"] if e.get("holdout_consulte"))
+
+
 def record_run(reg: dict, run: dict) -> dict:
-    """Ajoute les résultats d'une exécution du programme v3 (idempotent : remplace les entrées de même id)."""
+    """Ajoute les résultats d'une exécution du programme v3 (idempotent : remplace les entrées de même id).
+    Une consultation de période réservée est irréversible : le drapeau n'est jamais remis à faux, et la période
+    passe à l'état « CONSULTÉE » dans le registre."""
+    already = holdout_consulted(reg)
     meta = run["meta"]
     new = []
     for key, r in run["facteurs"].items():
@@ -50,7 +58,12 @@ def record_run(reg: dict, run: dict) -> dict:
                     "donnees": meta["donnees"], "periode": "développement (signaux <= 2026-02-28)",
                     "dates": d.get("dates", 0), "stat": d.get("stat"), "t": d.get("t"),
                     "top_vs_univers_net_25pb": (d.get("top_vs_univers_net") or {}).get("25pb"),
-                    "decision": r["decision"]["decision"], "holdout_consulte": "holdout" in r})
+                    "decision": r["decision"]["decision"],
+                    "holdout_consulte": "holdout" in r or f"v3-{key}" in already})
+        if "holdout" in r:
+            for h in reg["periodes_reservees"]:
+                if h["etude"].startswith("univers large") and h["etat"] == "INTACTE":
+                    h["etat"] = f"CONSULTÉE le {meta['date']} pour v3-{key} (ne redevient jamais vierge)"
     for name, m in (run.get("ml", {}).get("modeles") or {}).items():
         if name == "reference":
             continue

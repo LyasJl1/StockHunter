@@ -1,0 +1,24 @@
+{% if not v %}<div class="card">Aucun classement enregistré : le moteur de découverte tourne chaque soir après la collecte.</div>{% else %}
+{% set outcome_fr = {'PLANNED': 'plan en attente', 'OPEN': 'position simulée', 'CLOSED': 'clos', 'CANCELLED': 'annulé'} %}
+{% for c in v.categories %}{% if not f.category or f.category == c.key %}
+<div class="card" style="margin-bottom:16px">
+  <h2>{{ c.label }} <span class="sub" style="text-transform:none;letter-spacing:0">— {{ c.rows|length }} affiché(s) sur {{ c.admis }} titre(s) remplissant la règle</span></h2>
+  <p class="sub" style="margin-top:0">Règle : {{ c.regle }}.<br>Validation : <b>{{ c.validation }}</b> — sélection exploratoire, pas une recommandation.</p>
+  {% if c.suspendue %}<p class="neg">Catégorie suspendue : {{ c.motif }}.</p>
+  {% elif not c.rows %}<p class="muted">Aucun titre ne remplit cette règle {{ 'avec ces filtres' if f.q or f.tier or f.min_conf else 'à cette date' }}.</p>
+  {% else %}
+  <table><tr><th>#</th><th>Action</th><th class="r">Clôture</th><th class="r hide-sm">3 mois</th><th class="r hide-sm">vs SPY</th><th class="hide-sm">Taille</th><th class="r hide-sm">Confiance données</th><th>Pourquoi</th><th class="hide-sm">Prudence</th><th>Suivi</th></tr>
+  {% for r in c.rows %}<tr>
+    <td>{{ r.rank }}</td>
+    <td><a href="/discover/{{ r.ticker }}"><b>{{ r.ticker }}</b></a>{% if r.new %} <span class="pill READY">nouveau</span>{% endif %}<div class="sub">{{ (r.name or '')[:38] }}</div></td>
+    <td class="r">{{ r.close|num }} $</td>
+    <td class="r hide-sm {{ 'pos' if (r.metrics.ret_3m or 0) > 0 else 'neg' }}">{{ r.metrics.ret_3m|pct }}</td>
+    <td class="r hide-sm">{{ r.metrics.rs_spy_3m|pct }}</td>
+    <td class="hide-sm sub">{{ r.tier }}</td>
+    <td class="r hide-sm">{{ (r.confidence * 100)|round|int }} %</td>
+    <td class="sub">{{ r.pos[:2]|join(' · ') }}</td>
+    <td class="sub hide-sm">{{ r.neg[:1]|join(' · ') or '—' }}</td>
+    <td class="sub">{% if r.outcome %}{{ outcome_fr[r.outcome.status] }}{% if r.outcome.r is not none %} ({{ r.outcome.r|num(2) }} R){% endif %}{% else %}à venir{% endif %}</td>
+  </tr>{% endfor %}</table>{% endif %}
+</div>{% endif %}{% endfor %}
+{% endif %}

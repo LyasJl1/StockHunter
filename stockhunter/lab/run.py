@@ -16,13 +16,27 @@ DEV_END = date(2026, 2, 28)
 HOLDOUT_START = date(2026, 4, 1)
 
 
-def run_program(p: Panel, with_ml: bool = True, with_portfolio: bool = True, today: date | None = None) -> dict:
+GRID_ANCHOR = date(2024, 11, 12)      # première séance des données : la grille de signal ne dépend pas du panel chargé
+
+
+def signal_grid(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    """Une date de signal toutes les 5 séances de bourse comptées depuis GRID_ANCHOR (calendrier NYSE) : la grille
+    reste la même quand la fenêtre de données glisse."""
+    from stockhunter.data.calendar import sessions_between
+    return pd.DatetimeIndex([d for d in index if d.date() >= GRID_ANCHOR
+                             and sessions_between(GRID_ANCHOR, d.date()) % ev.EVERY == 0])
+
+
+def run_program(p: Panel, with_ml: bool = True, with_portfolio: bool = True, today: date | None = None,
+                holdout_consulted: frozenset[str] = frozenset()) -> dict:
+    """`holdout_consulted` : identifiants (ex. « v3-V2 ») dont la période réservée a déjà été consultée d'après
+    le registre — elle n'est JAMAIS réévaluée (consultation unique)."""
     mask = universe_mask(p)
     tier = liquidity_tier(p, mask)
     facs = fx.compute(p, mask)
     fwd = {h: forward_returns(p, h) for h in ev.HORIZONS}
     bfw = {h: bench_forward(p, h) for h in ev.HORIZONS}
-    all_dates = p.close.index[::ev.EVERY]
+    all_dates = signal_grid(p.close.index)
     dev = all_dates[all_dates <= pd.Timestamp(DEV_END)]
     hol = all_dates[all_dates >= pd.Timestamp(HOLDOUT_START)]
     last = mask.iloc[-1]
@@ -41,7 +55,9 @@ def run_program(p: Panel, with_ml: bool = True, with_portfolio: bool = True, tod
         dev_res = ev.evaluate(facs[key], spec.kind, spec.sign, p, mask, tier, fwd, bfw, dev)
         entry = {"label": spec.label, "famille": spec.family, "sens": spec.sign, "type": spec.kind,
                  "fondement": spec.rationale, "developpement": dev_res, "decision": ev.decide(dev_res)}
-        if entry["decision"]["decision"] == "CANDIDAT":          # consultation unique prévue par le protocole
+        if entry["decision"]["decision"] == "CANDIDAT" and f"v3-{key}" in holdout_consulted:
+            entry["decision"]["decision"] = "CANDIDAT (période réservée déjà consultée : voir le registre)"
+        elif entry["decision"]["decision"] == "CANDIDAT":        # consultation unique prévue par le protocole
             hol_res = ev.evaluate(facs[key], spec.kind, spec.sign, p, mask, tier, fwd, bfw, hol)
             entry["holdout"] = hol_res
             entry["decision"] = ev.decide(dev_res, hol_res)
