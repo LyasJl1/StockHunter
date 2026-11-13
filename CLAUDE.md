@@ -46,6 +46,11 @@ Méthode détaillée : `docs/scoring.md`. Protocole de backtest et résultats : 
   dashboard/           FastAPI + Jinja + HTMX + Chart.js (scripts embarqués), auth scrypt, CSRF, CSP
   catalysts/           rubriques 8-K et titres d'articles classés par règles ; catalyseurs récents (rapport, alertes)
   analysis/synthesis.py synthèse écrite et sourcée par action (règles, sans LLM), famille E informative
+  trading/rules.py     règles de trading simulé UNIQUES (paper + backtest) : ne jamais dupliquer cette logique
+  lab/                 laboratoire v3 : univers dynamique, facteurs, évaluation robuste, ML purgé, registre.json
+  discovery/           moteur de découverte (univers large) : catégories, analyse approfondie, suivi des signaux
+  pipeline.py          chaîne nocturne ; un échec critique fait échouer le job (plus de `|| echo warning`)
+StockHunter 3.0 : docs/v3/ (audit, architecture, rapport 2.0 → 3.0, mise en production).
 Phases 1 à 8 livrées (audit : docs/reports/2026-11-12-audit-final.md). Ancien plan : `risk/ portfolio/ notifications/ reports/ dashboard/`.
 Cycle d'une stratégie : RESEARCH → BACKTEST → OUT-OF-SAMPLE → PAPER → PROMOTED.
 
@@ -72,6 +77,10 @@ stockhunter notify evening|morning [--preview] [--force]   # rapport quotidien +
 stockhunter dashboard hash-password # génère SH_DASHBOARD_PASSWORD_HASH et SH_DASHBOARD_SECRET
 stockhunter dashboard serve [--port 8000] [--insecure-cookies] [--telegram-worker]   # interface web
 stockhunter db copy-to URL          # copie vérifiée vers une base vide (migration PostgreSQL)
+stockhunter db tune                 # PostgreSQL : plafonne les WAL, point de contrôle, nettoyage (volume 0,5 Go)
+stockhunter pipeline nightly        # chaîne complète ; sort en erreur si une étape critique échoue
+stockhunter discover run|status     # scanner de l'univers large + analyse approfondie + suivi des signaux
+stockhunter lab run|registry        # programme de recherche pré-enregistré ; registre des expériences
 SH_TEST_DATABASE_URL=postgresql://... pytest -m "not live"   # suite complète sur PostgreSQL
 pytest -m "not live"                # tests hors réseau
 pytest -m live                      # tests réels (clés requises)
@@ -84,6 +93,14 @@ pytest -m live                      # tests réels (clés requises)
 - Une étude de recherche suit son pré-enregistrement (docs/research/) : pas de réglage au vu des résultats.
 - Aucune règle n'est réglée en regardant la période réservée. Chercher sur la période de développement, figer,
   puis évaluer la période réservée UNE fois (`validate --holdout`).
+
+## Règles de recherche (v3)
+- Toute hypothèse est écrite dans docs/research/ et commitée AVANT d'être exécutée ; tout test va dans
+  `stockhunter/lab/registry.json` (jamais de suppression). Le seuil tient compte de toute la famille de tests.
+- Une période réservée consultée ne redevient jamais vierge, quelle que soit la version du code.
+- Les données de marché complètes ne sont pas dans le dépôt ni en local : la recherche s'exécute dans GitHub
+  Actions (workflow « Laboratoire v3 », lecture seule) et n'imprime que des métriques.
+- Aucun modèle ML en production s'il ne bat pas la référence simple hors entraînement.
 
 ## Conventions
 - Python 3.12+, typage, fonctions `parse_*` pures et testées séparément des appels réseau.
