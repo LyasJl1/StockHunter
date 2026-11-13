@@ -18,6 +18,23 @@ test ou observé en production ; chaque correctif a un test de non-régression.
 | 10 | **Rapport du matin jamais envoyé si GitHub est en retard** (il n'agissait qu'à 8 h pile ; le 13/11 la planification a eu 4 h de retard) | runs du 13/11 | envoi entre 8 h et 12 h, une fois par jour ; créneaux multiples | test paramétré mis à jour |
 | 11 | **Limite de corrélation absente** du portefeuille simulé | lecture | refus motivé si corrélation 60 j > 0,80 avec une position ouverte | `test_correlated_position_is_refused` |
 
+## Revue indépendante du moteur quantitatif (13/11/2026)
+Menée par un agent distinct, en lecture seule, sans avoir écrit le code. **Aucun look-ahead** dans les facteurs,
+l'univers, les rendements futurs et la purge ML ; statistiques (Newey-West, p-valeurs, bootstrap, règle de
+décision) conformes ; les décisions du registre ne sont pas remises en cause. Défauts trouvés, tous corrigés :
+
+| # | Défaut (gravité) | Correctif | Test |
+|---|---|---|---|
+| R1 | Paper trading : en rattrapage de plusieurs séances, un trade profitait d'une sortie future d'un autre (important) | traitement séance par séance pour tout le portefeuille | `test_catch_up_run_equals_daily_runs` |
+| R2 | Place ou capital libéré en séance réutilisé à l'ouverture du même jour, paper et backtest (important) | entrées décidées avant la gestion des positions | `test_slot_freed_intraday_is_not_reused_at_same_day_open` |
+| R3 | Gradient boosting : arrêt anticipé de scikit-learn, donc pas toujours 100 arbres (écart au protocole) | `early_stopping=False` ; écart consigné au registre, résultat non ré-exécuté | — |
+| R4 | Consultation « unique » de la période réservée non garantie par le code (latent) | refus si déjà consultée d'après le registre ; état de la période mis à jour | `test_registry_records_every_test_once` |
+| R5 | Titres radiés jamais clôturés dans le backtest ; plans sans cotation éternels (moyen) | clôture au dernier cours après 10 séances, plan annulé après 5 | couvert par les tests de simulation |
+| R6 | V1 absent du test prospectif ; niveau de cassure incluant les cours postérieurs ; Holm/BH sur le nombre de p-valeurs et non la famille ; courbe à 0 un jour sans cotation ; signal jamais finalisé sans ouverture à J+1 ; grille de signal dépendante du début du panel (mineurs) | corrigés | suite complète |
+
+Non corrigé, documenté : rendements hors dividendes (léger biais contre les facteurs à faible risque, SPY traité
+de même) ; un détachement de dividende peut déclencher un stop simulé sans crédit du dividende.
+
 ## Points vérifiés sans défaut
 Absence de look-ahead du scan v2 (test existant), immutabilité des scans, séparation réel / simulé, secrets
 (aucun dans l'historique git), authentification du dashboard (corrigée le 12/11 : nonce CSP, limitation réelle).

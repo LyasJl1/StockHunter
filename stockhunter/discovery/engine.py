@@ -126,7 +126,10 @@ def run(p: Panel, names: dict[str, str] | None = None, filt: UniverseFilter = Un
 
     # ------------------------------------------------------------------ règles d'entrée des catégories
     recent_bo = facs["V4"].iloc[-5:].any()
-    bo_level = hi60_prev
+    # niveau de la consolidation : plus haut des 60 séances closes AVANT la fenêtre de 5 jours où la sortie a pu
+    # avoir lieu (sinon le niveau inclurait les plus hauts faits depuis la cassure)
+    bo_level = p.high.iloc[max(0, i - 64):max(1, i - 4)].max()
+    watch_level = hi60_prev
     rng = lambda n: p.high.iloc[-n - 1:-1].max() / p.low.iloc[-n - 1:-1].min() - 1
     contraction = rng(20) < 0.8 * rng(120)
     gap = p.open / c.shift(1) - 1
@@ -141,8 +144,8 @@ def run(p: Panel, names: dict[str, str] | None = None, filt: UniverseFilter = Un
         "breakout": (m & recent_bo & (last >= bo_level * 0.98) & (atr_pct <= 0.08), rk["V2"].fillna(0.5)),
         "steady": (m & (rk["V2"] >= 0.70) & (rk["H4"] <= 0.30) & (rk["V9"] <= 0.30) & trend_ok, rk["MF"]),
         "shock": (m & shock_recent.any() & (last >= shock_open), (last / shock_open - 1).clip(upper=1.0)),
-        "watch": (m & ~recent_bo & contraction & (last >= bo_level * 0.97) & (last < bo_level) & trend_ok,
-                  last / bo_level),
+        "watch": (m & ~recent_bo & contraction & (last >= watch_level * 0.97) & (last < watch_level) & trend_ok,
+                  last / watch_level),
     }
     hostile = overview["regime"] == "DÉFAVORABLE"
     categories, total = {}, 0
@@ -157,7 +160,8 @@ def run(p: Panel, names: dict[str, str] | None = None, filt: UniverseFilter = Un
             picks = score[cond].dropna().sort_values(ascending=False).head(MAX_PER_CATEGORY)
             for rank, (t, sc) in enumerate(picks.items(), 1):
                 entry["candidats"].append(_card(t, rank, float(sc), key, d, names, raw, last, atr14, atr_pct, r1, r3, r6,
-                                                spy3, ext50, sma50, sma200, med_dv, tier, rk, hist, listed20, bo_level,
+                                                spy3, ext50, sma50, sma200, med_dv, tier, rk, hist, listed20,
+                                                watch_level if key == "watch" else bo_level,
                                                 shock_day, shock_open, gap, rules))
             total += len(entry["candidats"])
         categories[key] = entry

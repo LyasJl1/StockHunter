@@ -17,6 +17,10 @@ from stockhunter.lab.stats import curve_stats
 from stockhunter.trading.rules import Bar, Position, Rules, plan, risk_size, step
 
 
+STALE_SESSIONS = 10        # mêmes seuils que le paper trading
+PLAN_VALID_SESSIONS = 5
+
+
 @dataclass(frozen=True)
 class PortfolioParams:
     capital: float = 100_000.0
@@ -41,12 +45,31 @@ def simulate(p: Panel, score: pd.DataFrame, mask: pd.DataFrame, signal_dates: pd
     done: list[tuple[str, Position]] = []
     refusals: dict[str, int] = {}
     curve, expo = [], []
+    last_quote: dict[str, int] = {}
+    born: dict[str, int] = {}
     for i, d in enumerate(sessions):
-        for sym in list(live):
+        # État figé à l'ouverture : les entrées du jour ne profitent pas d'une place ou d'un capital libéré par une
+        # sortie survenue plus tard dans la même séance (entrées d'abord, gestion des positions ensuite).
+        order = [s_ for s_, q in live.items() if q.status == "PLANNED"] + [s_ for s_, q in live.items() if q.status == "OPEN"]
+        for sym in order:
             pos = live[sym]
             o, h, lo, c = (p.open.at[d, sym], p.high.at[d, sym], p.low.at[d, sym], p.close.at[d, sym])
             if not np.isfinite(c) or not np.isfinite(o):
-                continue                                           # pas de cotation ce jour : rien d'observable
+                idle = i - last_quote.get(sym, born[sym])
+                if pos.status == "PLANNED" and idle > PLAN_VALID_SESSIONS:
+                    pos.status, pos.close_reason = "CANCELLED", "aucune cotation après le signal"
+                    refusals["aucune cotation"] = refusals.get("aucune cotation", 0) + 1
+                    done.append((sym, live.pop(sym)))
+                elif pos.status == "OPEN" and idle > STALE_SESSIONS:          # radiation / suspension
+                    px = float(cf.at[d, sym])
+                    pos.realized += (px - pos.entry_price) * pos.shares
+                    pos.costs += px * pos.shares * rules.cost_bps / 1e4
+                    cash += px * pos.shares * (1 - rules.cost_bps / 1e4)
+                    pos.shares, pos.status, pos.exit_date = 0.0, "CLOSED", d.date()
+                    pos.close_reason = "plus de cotation : sortie au dernier cours connu"
+                    done.append((sym, live.pop(sym)))
+                continue
+            last_quote[sym] = i
 
             def size(fill, off, sym=sym):
                 opened = [(s, q) for s, q in live.items() if q.status == "OPEN"]
@@ -82,6 +105,7 @@ def simulate(p: Panel, score: pd.DataFrame, mask: pd.DataFrame, signal_dates: pd
                 if sym in live or not np.isfinite(at) or at <= 0:
                     continue
                 live[sym] = plan(float(cl), float(at), rules)
+                born[sym] = i
     eq = pd.Series(curve, index=sessions)
     closed = [q for _s, q in done if q.status == "CLOSED"]
     net = np.array([q.realized - q.costs for q in closed])

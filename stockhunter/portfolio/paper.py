@@ -33,6 +33,7 @@ from stockhunter.db.models import (
     ScanRun,
     Score,
 )
+from stockhunter.data.calendar import sessions_between
 from stockhunter.db.session import session_scope
 from stockhunter.trading.rules import Bar, Position, Rules, risk_size, step
 
@@ -188,31 +189,73 @@ def _sizer(s, t: PaperTrade, inst: Instrument, d: date, cfg: PaperConfig):
     return size
 
 
+STALE_SESSIONS = 10      # sans cotation pendant 10 séances : position valorisée au dernier cours et close
+PLAN_VALID_SESSIONS = 5  # un plan non exécuté faute de cotation est annulé après 5 séances
+
+
 def process(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER) -> dict[str, int]:
-    """Applique les séances nouvelles à chaque plan et position, dans l'ordre chronologique, avec les règles
-    partagées `stockhunter.trading.rules` (les mêmes que le backtest)."""
+    """Applique les séances nouvelles avec les règles partagées `stockhunter.trading.rules`.
+
+    Ordre strictement chronologique, séance par séance pour TOUT le portefeuille (jamais un trade entier avant
+    le suivant) : le résultat est le même qu'on traite une séance par soir ou dix d'un coup. Dans une séance, les
+    entrées (à l'ouverture) sont décidées AVANT la gestion des positions ouvertes : une place ou du capital
+    libéré en cours de séance ne sert pas à une entrée faite à l'ouverture du même jour."""
     counts = {"ouvertes": 0, "annulees": 0, "fermees": 0, "tp1": 0}
     rules = cfg.rules()
     with session_scope(engine) as s:
         trades = list(s.scalars(select(PaperTrade).where(PaperTrade.status.in_(("PLANNED", "OPEN")))
                                 .order_by(PaperTrade.signal_date, PaperTrade.id)))
+        insts = {t.id: s.get(Instrument, t.instrument_id) for t in trades}
+        pending: dict[int, dict] = {}
         for t in trades:
-            inst = s.get(Instrument, t.instrument_id)
-            for b in _bars_after(s, t.instrument_id, t.last_processed or t.signal_date):
-                if t.status not in ("PLANNED", "OPEN"):
-                    break
-                pos = to_position(t)
-                bar = Bar(b.bar_date, b.open, b.high, b.low, b.close, b.split_factor or 1.0)
-                for ev in step(pos, bar, _sizer(s, t, inst, b.bar_date, cfg), rules):
-                    _event(s, t, ev.date, ev.kind, ev.price, ev.shares, ev.detail)
-                    key = {"OPENED": "ouvertes", "CANCELLED": "annulees", "TP1": "tp1"}.get(ev.kind)
-                    if key:
-                        counts[key] += 1
-                _write_back(t, pos)
-                t.last_processed = b.bar_date
-                if t.status == "CLOSED":
-                    counts["fermees"] += 1
-                s.flush()
+            rows = _bars_after(s, t.instrument_id, t.last_processed or t.signal_date)
+            pending[t.id] = {b.bar_date: b for b in rows
+                             if None not in (b.open, b.high, b.low, b.close)}     # barre incomplète : ignorée
+
+        def apply(t: PaperTrade, b) -> None:
+            pos = to_position(t)
+            bar = Bar(b.bar_date, b.open, b.high, b.low, b.close, b.split_factor or 1.0)
+            for ev in step(pos, bar, _sizer(s, t, insts[t.id], b.bar_date, cfg), rules):
+                _event(s, t, ev.date, ev.kind, ev.price, ev.shares, ev.detail)
+                key = {"OPENED": "ouvertes", "CANCELLED": "annulees", "TP1": "tp1"}.get(ev.kind)
+                if key:
+                    counts[key] += 1
+            _write_back(t, pos)
+            t.last_processed = b.bar_date
+            if t.status == "CLOSED":
+                counts["fermees"] += 1
+            s.flush()
+
+        for d in sorted({d for bars in pending.values() for d in bars}):
+            todays = [t for t in trades if d in pending[t.id] and t.status in ("PLANNED", "OPEN")]
+            was_open = {t.id for t in todays if t.status == "OPEN"}
+            for t in todays:                                   # 1) entrées à l'ouverture
+                if t.id not in was_open:
+                    apply(t, pending[t.id][d])
+            for t in todays:                                   # 2) gestion des positions déjà ouvertes
+                if t.id in was_open:
+                    apply(t, pending[t.id][d])
+
+        # titres sans cotation (suspension, radiation) : ne pas laisser un plan ou une position en suspens
+        latest = s.scalar(select(func.max(PriceBar.bar_date)))
+        for t in trades:
+            if t.status not in ("PLANNED", "OPEN") or latest is None:
+                continue
+            ref = t.last_processed or t.signal_date
+            gap = sessions_between(ref, latest)
+            if t.status == "PLANNED" and gap > PLAN_VALID_SESSIONS:
+                t.status, t.close_reason = "CANCELLED", f"aucune cotation pendant {PLAN_VALID_SESSIONS} séances après le signal"
+                _event(s, t, latest, "CANCELLED", None, None, t.close_reason)
+                counts["annulees"] += 1
+            elif t.status == "OPEN" and gap > STALE_SESSIONS:
+                px = s.scalar(select(PriceBar.close).where(PriceBar.instrument_id == t.instrument_id, PriceBar.bar_date <= ref)
+                              .order_by(PriceBar.bar_date.desc()).limit(1))
+                why = f"plus de cotation depuis {STALE_SESSIONS} séances : sortie au dernier cours connu"
+                t.realized_pnl += (px - t.entry_price) * t.shares
+                t.costs += px * t.shares * cfg.cost_bps / 1e4
+                _event(s, t, latest, "CLOSED", px, t.shares, why)
+                t.shares, t.status, t.exit_date, t.close_reason = 0.0, "CLOSED", latest, why
+                counts["fermees"] += 1
     return counts
 
 
@@ -295,8 +338,8 @@ def equity_curve(engine: Engine, cfg: PaperConfig | None = None) -> list[dict[st
                     held -= ev.shares
             realized -= cost
             if held > 1e-9:
-                px = closes[t.id].get(d)
-                if px is not None:
-                    mtm += (px - entry) * held
+                known = [dd for dd in closes[t.id] if dd <= d]             # dernier cours connu (jour sans cotation)
+                if known:
+                    mtm += (closes[t.id][max(known)] - entry) * held
         out.append({"date": d.isoformat(), "equity": cfg.capital + realized + mtm, "spy": spy_close.get(d)})
     return out

@@ -78,7 +78,7 @@ def update_outcomes(engine: Engine, p: Panel, rules: Rules = Rules(), stale_sess
                 continue
             scale = adj0 / card["signal_close"]               # unités du jour du signal -> unités ajustées actuelles
             pos = plan(adj0, card["atr"] * scale, rules)
-            size = lambda fill, off: (1000.0 / off, None)
+            size = lambda fill, off: (1_000_000.0 / off, None)   # risque fixe ; assez grand pour ne jamais tomber sous 1 action
             last_seen = i0
             for i in range(i0 + 1, len(sessions)):
                 o, h, lo, cl = (p.open.at[sessions[i], t], p.high.at[sessions[i], t], p.low.at[sessions[i], t],
@@ -95,13 +95,15 @@ def update_outcomes(engine: Engine, p: Panel, rules: Rules = Rules(), stale_sess
             if delisted:
                 if pos.status == "OPEN":
                     last_px = p.close.at[sessions[last_seen], t]
-                    r = ((last_px - pos.entry_price) * pos.shares + pos.realized - pos.costs) / pos.initial_risk
+                    exit_cost = last_px * pos.shares * rules.cost_bps / 1e4
+                    r = ((last_px - pos.entry_price) * pos.shares + pos.realized - pos.costs - exit_cost) / pos.initial_risk
                 detail = "plus de cotation (radiation ou suspension) : valorisé au dernier cours connu"
             ret20 = fw20.iat[i0, fw20.columns.get_loc(t)]
             ret20 = float(ret20) if np.isfinite(ret20) else None
             univ = fw20.iloc[i0][mask.iloc[i0]].mean() if ret20 is not None else None
             done_trade = pos.status in ("CLOSED", "CANCELLED") or delisted
-            final = done_trade and (ret20 is not None or delisted)
+            horizon_over = i0 + 20 < len(sessions)            # rendement à 20 séances définitivement connu (ou absent)
+            final = done_trade and (ret20 is not None or delisted or horizon_over)
             row = s.get(DiscoveryOutcome, c.id) or DiscoveryOutcome(candidate_id=c.id, status="PLANNED")
             row.status = "CLOSED" if delisted and pos.status == "OPEN" else pos.status
             row.final, row.entry_date, row.exit_date = final, pos.entry_date, pos.exit_date

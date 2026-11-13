@@ -228,7 +228,8 @@
    "t": 1.6450615862260272,
    "top_vs_univers_net_25pb": 0.011170511290136648,
    "decision": "NON RETENU",
-   "holdout_consulte": false
+   "holdout_consulte": false,
+   "note": "Définition exacte du code : moyenne ÷ écart-type des résidus d'une régression sans constante sur le marché équipondéré (titre inclus) ; même classement que « somme ÷ écart-type » du protocole."
   },
   {
    "id": "v3-V4",
@@ -353,7 +354,8 @@
    "t": -0.7301396062552087,
    "top_vs_univers_net_25pb": -0.0051224246858410875,
    "decision": "NON RETENU (ne bat pas la référence simple)",
-   "holdout_consulte": false
+   "holdout_consulte": false,
+   "note": "Écart au protocole relevé par la revue indépendante du 13/11/2026 : exécuté avec l'arrêt anticipé de scikit-learn (moins de 100 arbres possibles). Aucune fuite d'information ; résultat conservé tel quel, non ré-exécuté pour ne pas ajouter un test à la famille. Code corrigé (early_stopping=False) pour toute exécution future."
   }
  ],
  "executions": [
@@ -373,5 +375,9 @@
    "memoire_max_mo": 1618,
    "resume": "aucun facteur CANDIDAT ; aucun modèle ML retenu ; période réservée non consultée"
   }
+ ],
+ "notes": [
+  "Seuil t >= 3,0 : exact pour Bonferroni 5 %/16 avec 39 dates (p = 0,0024) ; avec 22 dates (ML) il faudrait t >= 3,05. Sans effet : les t des modèles sont négatifs.",
+  "Revue indépendante du 13/11/2026 : aucun look-ahead dans les facteurs, l'univers, les rendements futurs et la purge ML ; décisions inchangées."
  ]
 }

@@ -17,7 +17,7 @@ Aucun chiffre n'est estimé : « non mesuré » signifie qu'aucune mesure n'exis
 | Sharpe | voir rapport v2.0.0 | −0,83 (SPY 0,91) |
 | Coût | 0 € de données ; Railway 1 $/mois de crédit | inchangé ; aucun service payant ajouté |
 | Fiabilité des jobs | 1 nuit observée sur la base Railway (13/11) : **échec masqué** (job vert, scan non fait) | chaîne testée (5 tests) ; **non mesurée en production** tant que la PR n'est pas fusionnée |
-| Tests automatisés | 106 | **139** (SQLite et PostgreSQL) |
+| Tests automatisés | 106 | **141** (SQLite et PostgreSQL) |
 
 ## Ce que ces résultats veulent dire
 - **Aucun avantage statistique robuste n'a été découvert.** Ni les facteurs classiques (momentum 12-1, tendance
@@ -42,7 +42,7 @@ Aucun chiffre n'est estimé : « non mesuré » signifie qu'aucune mesure n'exis
 | H dashboard | Marché, Scanner, Fiche approfondie, Laboratoire, Portefeuilles, Santé du système |
 | I Telegram | lecteur unique (fin des 409), alertes dédupliquées et plafonnées, résumé de découverte, `/scanner`, `/signal` |
 | J automatisation | chaîne à 8 étapes séparées, bilan en base, échecs non masqués, upsert incrémental, entretien de la base |
-| K tests | 139 tests, migrations vérifiées sur PostgreSQL, essai à blanc sur données réelles |
+| K tests | 141 tests, revue indépendante du moteur quantitatif (6 défauts corrigés, aucun look-ahead), migrations vérifiées sur PostgreSQL, essai à blanc sur données réelles |
 
 ## Non réalisé (et pourquoi)
 - **Fondamentaux, secteurs et capitalisations pour tout l'univers large** : non fournis par les plans gratuits.

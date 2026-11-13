@@ -471,8 +471,13 @@ def cmd_lab(settings, engine, args) -> int:
     from stockhunter.lab.run import render, run_program
     from stockhunter.market.store import MarketStore
     end = date.fromisoformat(args.end) if args.end else None
-    res = run_program(load_panel(engine, MarketStore(settings.market_dir), end))
-    reg = registry.record_run(registry.load(), _json.loads(_json.dumps(res, default=str)))
+    reg0 = registry.load()
+    res = run_program(load_panel(engine, MarketStore(settings.market_dir), end),
+                      holdout_consulted=registry.holdout_consulted(reg0))
+    reg = registry.record_run(reg0, _json.loads(_json.dumps(res, default=str)))
+    registry.save(reg)        # trace locale ; le registre versionné est mis à jour par commit à partir de ce résultat
+    if any("holdout" in r for r in res["facteurs"].values()):
+        print("ATTENTION : période réservée consultée lors de cette exécution — à consigner dans le registre versionné.")
     text = render(res, registry.family_pvalues(reg))
     if args.out:
         Path(args.out).write_text(text)

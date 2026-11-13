@@ -199,3 +199,59 @@ def test_correlated_position_is_refused(engine):
     paper.process(engine, NOSLIP)
     a, b = trade(engine, ids["ZZA"]), trade(engine, ids["ZZB"])
     assert a.status == "OPEN" and b.status == "CANCELLED" and "corrélée" in b.close_reason
+
+
+def _two_trade_scenario(engine):
+    """A entre le 3/11 et est stoppée le 4/11 ; B (une seule place au portefeuille) ne doit pas en profiter."""
+    src, ids, run = setup(engine, symbols=("ZZA", "ZZB"), sector=None)
+    paper.plan_from_scan(engine, run)
+    return src, ids, {"ZZA": [("2026-11-03", 100, 101, 99, 100), ("2026-11-04", 99, 99.5, 94, 95), ("2026-11-05", 95, 96, 94, 95)],
+                      "ZZB": [("2026-11-03", 100, 101, 99, 100), ("2026-11-04", 100, 101, 99, 100), ("2026-11-05", 100, 101, 99, 100)]}
+
+
+def test_catch_up_run_equals_daily_runs(engine, tmp_path):
+    """Revue indépendante (C1) : traiter 3 séances d'un coup doit donner exactement le même résultat que 3 soirs."""
+    from stockhunter.db.models import Base
+    from stockhunter.db.session import get_engine
+    cfg = PaperConfig(max_positions=1, slippage_bps=0.0)
+    src, ids, series = _two_trade_scenario(engine)
+    for k in range(3):                                           # un appel par soir
+        for sym in ids:
+            bars(engine, src, ids[sym], [series[sym][k]])
+        paper.process(engine, cfg)
+    daily = {sym: (trade(engine, ids[sym]).status, trade(engine, ids[sym]).close_reason) for sym in ids}
+
+    other = get_engine(f"sqlite:///{tmp_path / 'catchup.db'}")
+    Base.metadata.create_all(other)
+    src2, ids2, series2 = _two_trade_scenario(other)
+    for sym in ids2:
+        bars(other, src2, ids2[sym], series2[sym])
+    paper.process(other, cfg)                                    # rattrapage : 3 séances en un appel
+    catchup = {sym: (trade(other, ids2[sym]).status, trade(other, ids2[sym]).close_reason) for sym in ids2}
+    assert daily == catchup
+    assert daily["ZZB"][0] == "CANCELLED" and "limite de 1 positions" in daily["ZZB"][1]   # pas d'entrée grâce au futur
+
+
+def test_slot_freed_intraday_is_not_reused_at_same_day_open(engine):
+    """Revue indépendante (C2) : A sort en séance le 4/11 ; un plan B dont l'entrée est à l'OUVERTURE du 4/11 ne
+    peut pas utiliser la place libérée plus tard dans la journée."""
+    cfg = PaperConfig(max_positions=1, slippage_bps=0.0)
+    src, ids, run = setup(engine, symbols=("ZZA",), sector=None)
+    paper.plan_from_scan(engine, run)
+    bars(engine, src, ids["ZZA"], [("2026-11-03", 100, 101, 99, 100)])
+    paper.process(engine, cfg)
+    with session_scope(engine) as s:                             # second signal, daté du 3/11 : entrée prévue le 4/11
+        b = Instrument(symbol="ZZB", asset_type="stock")
+        s.add(b)
+        s.flush()
+        t = s.scalars(select(PaperTrade)).first()
+        s.add(PaperTrade(instrument_id=b.id, scan_run_id=t.scan_run_id, strategy_version_id=t.strategy_version_id,
+                         signal_date=date(2026, 11, 3), status="PLANNED", signal_close=100, atr_at_signal=2,
+                         entry_min=98, entry_max=103, stop_initial_offset=4, risk_fraction=0.005, strategies="A",
+                         plan_json="{}"))
+        bid = b.id
+    bars(engine, src, ids["ZZA"], [("2026-11-04", 99, 99.5, 94, 95)])          # A stoppée en séance
+    bars(engine, src, bid, [("2026-11-04", 100, 101, 99, 100)])
+    paper.process(engine, cfg)
+    assert trade(engine, ids["ZZA"]).status == "CLOSED"
+    assert trade(engine, bid).status == "CANCELLED" and "limite de 1 positions" in trade(engine, bid).close_reason

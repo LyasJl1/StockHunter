@@ -28,7 +28,7 @@ EVERY = broad.EVERY
 
 
 V3_STUDY = "v3-2026-11-12"           # hypothèses du programme v3 (docs/research/2026-11-12-preenregistrement-v3.md)
-V3_RANK_KEYS = ("V2", "V3", "V9", "MF")
+V3_RANK_KEYS = ("V1", "V2", "V3", "V9", "MF")   # V1 inclus : non testable sur l'historique, seul le prospectif le dira
 STUDIES = (broad.STUDY, V3_STUDY)
 
 
