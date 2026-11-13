@@ -64,6 +64,8 @@ def update_outcomes(engine: Engine, p: Panel, rules: Rules = Rules(), stale_sess
     sessions = p.close.index
     pos_of = {d.date(): i for i, d in enumerate(sessions)}
     fw20 = forward_returns(p, 20)
+    from stockhunter.lab.panel import bench_forward
+    spy20 = bench_forward(p, 20)
     mask = universe_mask(p)
     counts = {"mis_a_jour": 0, "finalises": 0}
     with session_scope(engine) as s:
@@ -109,6 +111,8 @@ def update_outcomes(engine: Engine, p: Panel, rules: Rules = Rules(), stale_sess
             row.final, row.entry_date, row.exit_date = final, pos.entry_date, pos.exit_date
             row.r_multiple = None if r is None else float(r)
             row.ret_20, row.excess_20 = ret20, (None if ret20 is None else float(ret20 - univ))
+            sp = None if spy20 is None or ret20 is None else spy20.iloc[i0]
+            row.spy_20 = None if sp is None or not np.isfinite(sp) else float(sp)
             row.detail = detail
             s.add(row)
             counts["mis_a_jour"] += 1
@@ -116,30 +120,49 @@ def update_outcomes(engine: Engine, p: Panel, rules: Rules = Rules(), stale_sess
     return counts
 
 
-def performance(engine: Engine) -> dict[str, Any]:
-    """Bilan prospectif par catégorie (signaux finalisés uniquement). Descriptif tant que l'échantillon est petit."""
+def _stats(g: pd.DataFrame) -> dict[str, Any]:
+    f = g[g["final"] == True]  # noqa: E712
+    traded = f[f["r"].notna()].sort_values("exit")
+    by_date = f.dropna(subset=["excess"]).groupby("as_of")["excess"].mean()
+    t = None
+    if len(by_date) >= 8 and by_date.std() > 0:
+        t = float(by_date.mean() / by_date.std() * math.sqrt(len(by_date)))
+    cum = traded["r"].cumsum()
+    dd = float((cum - cum.cummax()).min()) if len(cum) else None
+    vs_spy = (f["ret20"] - f["spy20"]).dropna()
+    return {"signaux": int(len(g)), "finalises": int(len(f)), "en_cours": int(len(g) - len(f)),
+            "executes": int(g["entry"].notna().sum()), "trades": int(len(traded)),
+            "annules": int((f["status"] == "CANCELLED").sum()),
+            "gagnants": float((traded["r"] > 0).mean()) if len(traded) else None,
+            "r_moyen": float(traded["r"].mean()) if len(traded) else None,
+            "r_median": float(traded["r"].median()) if len(traded) else None,
+            "r_cumule": float(cum.iloc[-1]) if len(cum) else None, "drawdown_r": dd,
+            "exces_20j_moyen": float(f["excess"].mean()) if f["excess"].notna().any() else None,
+            "vs_spy_20j_moyen": float(vs_spy.mean()) if len(vs_spy) else None,
+            "dates": int(len(by_date)), "t_exces": t,
+            "lecture": "échantillon insuffisant (< 8 dates)" if len(by_date) < 8 else
+                       "descriptif : dates qui se chevauchent, non corrigé"}
+
+
+def performance(engine: Engine, by: str = "category") -> dict[str, Any]:
+    """Bilan des signaux du scanner, calculé à partir des transactions simulées (règles partagées, frais et
+    glissement inclus) — jamais à partir des scores. `by` : « category », « month » ou « all ».
+    R = P&L net ÷ risque initial ; drawdown en R sur la suite des trades classés par date de sortie ;
+    excès à 20 séances vs univers équipondéré et vs SPY (bruts de frais). Descriptif tant que l'échantillon est petit."""
     with session_scope(engine) as s:
         rows = s.execute(select(DiscoveryCandidate.category, DiscoveryCandidate.as_of, DiscoveryOutcome.status,
-                                DiscoveryOutcome.final, DiscoveryOutcome.r_multiple, DiscoveryOutcome.excess_20)
+                                DiscoveryOutcome.final, DiscoveryOutcome.r_multiple, DiscoveryOutcome.excess_20,
+                                DiscoveryOutcome.entry_date, DiscoveryOutcome.exit_date, DiscoveryOutcome.ret_20,
+                                DiscoveryOutcome.spy_20)
                          .join(DiscoveryOutcome, DiscoveryOutcome.candidate_id == DiscoveryCandidate.id, isouter=True)).all()
-    out: dict[str, Any] = {}
-    df = pd.DataFrame(rows, columns=["category", "as_of", "status", "final", "r", "excess"])
-    for cat, g in df.groupby("category"):
-        f = g[g["final"] == True]  # noqa: E712
-        traded = f[f["r"].notna()]
-        by_date = f.dropna(subset=["excess"]).groupby("as_of")["excess"].mean()
-        t = None
-        if len(by_date) >= 8 and by_date.std() > 0:
-            t = float(by_date.mean() / by_date.std() * math.sqrt(len(by_date)))
-        out[cat] = {"signaux": int(len(g)), "finalises": int(len(f)), "trades": int(len(traded)),
-                    "annules": int((f["status"] == "CANCELLED").sum()),
-                    "r_moyen": float(traded["r"].mean()) if len(traded) else None,
-                    "gagnants": float((traded["r"] > 0).mean()) if len(traded) else None,
-                    "exces_20j_moyen": float(f["excess"].mean()) if f["excess"].notna().any() else None,
-                    "dates": int(len(by_date)), "t_exces": t,
-                    "lecture": "échantillon insuffisant (< 8 dates)" if len(by_date) < 8 else
-                               "descriptif : dates qui se chevauchent, non corrigé"}
-    return out
+    df = pd.DataFrame(rows, columns=["category", "as_of", "status", "final", "r", "excess", "entry", "exit", "ret20",
+                                     "spy20"])
+    if df.empty:
+        return {}
+    if by == "all":
+        return {"tous": _stats(df)}
+    key = df["category"] if by == "category" else pd.to_datetime(df["as_of"]).dt.strftime("%Y-%m")
+    return {k: _stats(g) for k, g in df.groupby(key)}
 
 
 # ============================================================================ analyse approfondie des candidats

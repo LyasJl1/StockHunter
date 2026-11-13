@@ -6,6 +6,11 @@ on:
   pull_request:
   workflow_dispatch:   # bouton « Run workflow » pour vérifier les API à la demande
 
+
+# Jeton GitHub en lecture seule : aucun workflow n'écrit dans le dépôt.
+permissions:
+  contents: read
+
 jobs:
   tests:
     runs-on: ubuntu-latest

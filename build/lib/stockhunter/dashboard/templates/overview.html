@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+{% if disc %}{% set m = disc.market %}
+<div class="card" style="margin-bottom:16px"><h2>Marché large — {{ disc.universe }} actions US négociables, clôture du {{ disc.as_of|d }}</h2>
+  <div class="grid g4">
+    <div><div class="sub">Tendance générale</div><div class="kpi {{ 'neg' if m.regime == 'DÉFAVORABLE' else 'pos' if m.regime == 'FAVORABLE' else '' }}" style="font-size:20px">{{ m.regime }}</div><div class="sub">{{ m.motif_regime }}</div></div>
+    <div><div class="sub">Largeur du marché</div><div class="kpi" style="font-size:20px">{{ m.part_au_dessus_mm50|pct(0, false) }}</div><div class="sub">au-dessus de leur moyenne 50 j · {{ m.part_au_dessus_mm200|pct(0, false) }} au-dessus de la 200 j</div></div>
+    <div><div class="sub">Plus hauts / plus bas de 60 séances</div><div class="kpi" style="font-size:20px">{{ m.part_plus_haut_60j|pct(1, false) }} / {{ m.part_plus_bas_60j|pct(1, false) }}</div><div class="sub">part des titres à un extrême ce jour-là</div></div>
+    <div><div class="sub">Risque</div><div class="kpi" style="font-size:20px">{{ (m.volatilite_mediane_60j * 100)|num(1) }} %</div><div class="sub">variation quotidienne médiane (60 j)</div></div>
+  </div>
+  <table style="margin-top:10px"><tr><th>Sur 1 mois</th><th class="r">Titre moyen</th><th class="r">SPY</th>{% for k in m.par_taille_1m %}<th class="r">{{ k }}</th>{% endfor %}<th class="r">Titre moyen 3 mois</th></tr>
+  <tr><td class="sub">rendement</td><td class="r">{{ m.rendement_univers_1m|pct }}</td><td class="r">{{ m.spy.rendement_1m|pct if m.spy else 'N/D' }}</td>{% for k, x in m.par_taille_1m.items() %}<td class="r">{{ x|pct }}</td>{% endfor %}<td class="r">{{ m.rendement_univers_3m|pct }}</td></tr></table>
+  <p class="sub">Scanner : {% for c in disc.categories %}<a href="/scanner?category={{ c.key }}">{{ c.label }}</a> {{ 'suspendue' if c.suspendue else c.rows|length }}{{ ' · ' if not loop.last }}{% endfor %}. {{ disc.conclusion }}</p></div>
+{% endif %}
+{% if not meta %}<div class="card">Aucun scan disponible : lancer l'ingestion puis <code>stockhunter scan</code>.</div>{% else %}
+{% if fresh.stale.stale %}<div class="banner" style="border-color:var(--neg)">⚠️ Données en retard : dernière clôture en base {{ fresh.last_price|d }}, séance attendue {{ fresh.stale.expected|d }} ({{ fresh.stale.lag if fresh.stale.lag is not none else '?' }} séance(s) manquante(s)). Les chiffres ci-dessous ne sont pas à jour.</div>{% endif %}
+<div class="banner">{{ meta.validation }}</div>
+<div class="grid g4">
+  <div class="card"><h2>Régime de marché</h2><div class="kpi">{{ meta.regime.label }}</div>
+    <div class="sub">{{ meta.regime.reasons[:3]|join(' · ') }}</div></div>
+  <div class="card"><h2>Opportunités actives</h2><div class="kpi">{{ n_active }}</div>
+    <div class="sub">DEVELOPING ou READY sur {{ n_total }} actions suivies · clôture du {{ meta.as_of|d }}</div></div>
+  <div class="card"><h2>Portefeuille simulé</h2><div class="kpi">{{ pf.equity|num(0) }} $</div>
+    <div class="sub">réalisé {{ pf.realized|num(0) }} $ · latent {{ pf.unrealized|num(0) }} $ · {{ pf.open }} position(s), {{ pf.planned }} plan(s)</div></div>
+  <div class="card"><h2>Mon portefeuille réel</h2>
+    {% set t = real.totals.EUR if real.totals else {} %}
+    {% if real.positions %}<div class="kpi">{{ t.value|num(0) }} €</div>
+    <div class="sub">latent {{ t.unrealized|num(0) }} € · réalisé {{ t.realized|num(0) }} € · dividendes {{ t.dividends|num(0) }} €
+      {% if real.fx %}· 1 € = {{ real.fx[0]|num(4) }} $ ({{ real.fx[1]|d }}){% endif %}</div>
+    {% else %}<div class="kpi">—</div><div class="sub"><a href="/portfolio?tab=real">Saisir mes opérations</a></div>{% endif %}</div>
+</div>
+{% if meta.sectors %}<div class="card" style="margin-top:16px"><h2>Secteurs dominants (ETF sectoriels, force relative 1-3 mois vs SPY)</h2>
+  <table><tr>{% for name, sct in (meta.sectors.items()|sort(attribute='1.rank'))[:11] %}<td>{{ loop.index }}. <b>{{ name }}</b></td>{% endfor %}</tr></table></div>{% endif %}
+<div class="grid g2" style="margin-top:16px">
+  <div class="card"><h2>Top 5 de l'univers suivi (42 actions)</h2>
+    <table><tr><th>Action</th><th class="r">Score</th><th>Statut</th><th class="r">Clôture</th><th class="hide-sm">Argument principal</th></tr>
+    {% for r in top %}<tr><td><a href="/stock/{{ r.symbol }}"><b>{{ r.symbol }}</b></a></td><td class="r">{{ r.total|num(0) }}</td>
+      <td><span class="pill {{ r.status }}">{{ r.status }}</span></td><td class="r">{{ r.close|num }} $</td>
+      <td class="hide-sm sub">{{ r.pos[0] if r.pos else '' }}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">Aucune action en DEVELOPING ou READY : aucun achat justifié selon les règles actuelles.</td></tr>{% endfor %}
+    </table></div>
+  <div class="card"><h2>Dernières alertes Telegram <span class="sub">(heure de Paris)</span></h2>
+    <table>{% for a in fresh.alerts %}<tr><td class="sub">{{ a.at|t }}</td><td>{{ a.title }}</td>
+      <td class="sub">{{ {'SENT':'envoyé','SKIPPED':'non configuré','PENDING':'en attente','FAILED':'échec'}[a.status] }}</td></tr>
+    {% else %}<tr><td class="muted">Aucune alerte.</td></tr>{% endfor %}</table></div>
+</div>
+<div class="card" style="margin-top:16px"><h2>Fraîcheur des données</h2>
+  <p class="sub">Dernière clôture en base : <b>{{ fresh.last_price|d }}</b>{% if fresh.critical %} · <span class="neg">{{ fresh.critical }} anomalie(s) critique(s)</span>{% endif %}</p>
+  <table><tr><th>Traitement</th><th>Dernière exécution (Paris)</th><th>Dernier succès</th></tr>
+  {% for name, j in fresh.jobs|dictsort %}<tr><td>{{ name }}</td>
+    <td class="{{ 'neg' if j.last[0]=='failed' }}">{{ j.last[0] }} · {{ j.last[1]|t }}</td>
+    <td>{{ j.ok|t if j.ok else 'jamais' }}</td></tr>{% endfor %}</table></div>
+{% endif %}
+{% endblock %}

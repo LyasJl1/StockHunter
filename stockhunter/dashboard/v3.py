@@ -114,6 +114,7 @@ def lab_view(engine: Engine) -> dict[str, Any]:
             for e in reg["experiences"]]
     return {"experiments": exps, "holdouts": reg["periodes_reservees"], "runs": reg.get("executions", []),
             "n_tests": len(registry.tests(reg)), "forward": fwd, "discovery": performance(engine),
+            "discovery_all": performance(engine, by="all").get("tous"), "discovery_month": performance(engine, by="month"),
             "validated": [e for e in exps if e["decision"].startswith(("VALIDÉ", "CONFIRMÉ"))]}
 
 
@@ -186,16 +187,55 @@ def system_view(engine: Engine, settings: Settings) -> dict[str, Any]:
         except Exception as exc:                                    # la page de santé ne doit jamais planter
             db.update(ok=False, error=str(exc)[:200])
         last_disc = s.scalar(select(func.max(DiscoveryRun.as_of)))
+        last_disc_at = s.scalar(select(func.max(DiscoveryRun.created_at)))
+        last_signal = s.execute(select(DiscoveryCandidate.as_of, DiscoveryCandidate.ticker)
+                                .order_by(DiscoveryCandidate.id.desc()).limit(1)).first()
+        last_ingest_ok = s.scalar(select(func.max(JobRun.finished_at)).where(
+            JobRun.job_name == "ingest_prices", JobRun.status.in_(("success", "partial"))))
+        open_failures = s.scalar(select(func.count()).select_from(NotificationLog).where(
+            NotificationLog.status == "FAILED", NotificationLog.created_at >= now - timedelta(days=2))) or 0
     reader_live = None
     if reader:
         until = datetime.fromisoformat(reader["until"])
         reader_live = {"owner": "serveur web" if reader["owner"].startswith("worker") else "tâche planifiée",
                        "active": until > now, "until": until}
-    limit_bytes = 500 * 1024 * 1024                                 # volume du plan gratuit Railway : 0,5 Go
-    return {"pipeline": pipe, "jobs": jobs, "quotas": quotas, "stale": staleness(last_price), "last_price": last_price,
+    limit_bytes = int(settings.db_volume_mb * 1024 * 1024)
+    try:
+        from stockhunter.db.copy import storage
+        disk = storage(engine, settings.db_volume_mb)
+    except Exception as exc:                                        # la page de santé ne doit jamais planter
+        disk = {"niveau": "inconnu", "erreur": str(exc)[:160]}
+    stale = staleness(last_price)
+    age = lambda t: None if t is None else (now - (t if t.tzinfo else t.replace(tzinfo=timezone.utc)))
+    pipe_ok = pipe and pipe.get("final") and pipe.get("status") == "success"
+    checks = [
+        ("Service web en ligne", True, "cette page répond"),
+        ("Base de données disponible", bool(db.get("ok")), db.get("error") or f"{db['dialect']} {db.get('version') or ''}"),
+        ("Espace disque", disk.get("niveau") in ("ok", "attention"),
+         f"{disk.get('utilise_mo', '?')} Mo / {disk.get('volume_mo', '?')} Mo — niveau {disk.get('niveau')}"
+         if "utilise_mo" in disk else disk.get("erreur") or "SQLite : sans objet"),
+        ("Données fraîches", not stale["stale"],
+         f"dernière clôture {last_price or 'aucune'} ; séance attendue {stale['expected']}"),
+        ("Dernière collecte des prix réussie", age(last_ingest_ok) is not None and age(last_ingest_ok) < timedelta(hours=36),
+         str(last_ingest_ok)[:16] if last_ingest_ok else "jamais"),
+        ("Chaîne nocturne complète", bool(pipe_ok),
+         "jamais exécutée" if not pipe else f"{pipe.get('status')} ({'terminée' if pipe.get('final') else 'en cours'}), "
+         f"séance {pipe.get('seance', '?')}"),
+        ("Dernier scanner exécuté", last_disc is not None and (stale["expected"] - last_disc).days <= 4,
+         f"séance {last_disc}" if last_disc else "jamais"),
+        ("Dernier signal enregistré", last_signal is not None,
+         f"{last_signal[1]} le {last_signal[0]}" if last_signal else "aucun"),
+        ("Dernière notification envoyée", age(last_sent) is not None and age(last_sent) < timedelta(hours=36),
+         str(last_sent)[:16] if last_sent else "jamais"),
+        ("Erreurs non résolues", open_failures == 0 and not anomalies.get("critical"),
+         f"{open_failures} envoi(s) Telegram en échec (48 h), {anomalies.get('critical', 0)} anomalie(s) critique(s)"),
+    ]
+    return {"checks": [{"label": l, "ok": ok, "detail": d} for l, ok, d in checks], "disk": disk,
+            "last_disc_at": last_disc_at,
+            "pipeline": pipe, "jobs": jobs, "quotas": quotas, "stale": stale, "last_price": last_price,
             "anomalies": anomalies, "notif": notif, "last_sent": last_sent, "failed_notif": failed_notif,
             "reader": reader_live, "db": db, "db_limit": limit_bytes,
-            "db_share": (db.get("bytes") or 0) / limit_bytes if db.get("bytes") else None,
+            "db_share": disk.get("part"),
             "last_discovery": last_disc, "now": now}
 
 

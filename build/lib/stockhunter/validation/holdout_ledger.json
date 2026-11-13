@@ -1,0 +1,7 @@
+{
+  "_doc": "Registre des consultations de la période réservée, versionné dans Git (la base de données d'un environnement ne voit pas celles des autres). Ajouter une entrée à chaque `validate --holdout`.",
+  "consultations": [
+    {"name": "stockhunter-multifactor", "version": "2.0.0", "holdout_start": "2024-11-12", "date": "2026-11-12",
+     "rapport": "docs/reports/2026-11-12-validation-v2.0.0-final.md", "verdict": "aucune stratégie validée"}
+  ]
+}

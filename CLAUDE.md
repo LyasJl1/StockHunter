@@ -77,7 +77,9 @@ stockhunter notify evening|morning [--preview] [--force]   # rapport quotidien +
 stockhunter dashboard hash-password # génère SH_DASHBOARD_PASSWORD_HASH et SH_DASHBOARD_SECRET
 stockhunter dashboard serve [--port 8000] [--insecure-cookies] [--telegram-worker]   # interface web
 stockhunter db copy-to URL          # copie vérifiée vers une base vide (migration PostgreSQL)
-stockhunter db tune                 # PostgreSQL : plafonne les WAL, point de contrôle, nettoyage (volume 0,5 Go)
+stockhunter db tune                 # PostgreSQL : plafonne les WAL et rend les segments au disque (sans suppression manuelle)
+stockhunter db check | diag         # occupation (seuils 80/90/95 %, alerte) | diagnostic détaillé en lecture seule
+stockhunter history fetch|status    # historique long Tiingo en Parquet (hors base), plafonné en titres/mois (--max-new)
 stockhunter pipeline nightly        # chaîne complète ; sort en erreur si une étape critique échoue
 stockhunter discover run|status     # scanner de l'univers large + analyse approfondie + suivi des signaux
 stockhunter lab run|registry        # programme de recherche pré-enregistré ; registre des expériences
@@ -93,6 +95,13 @@ pytest -m live                      # tests réels (clés requises)
 - Une étude de recherche suit son pré-enregistrement (docs/research/) : pas de réglage au vu des résultats.
 - Aucune règle n'est réglée en regardant la période réservée. Chercher sur la période de développement, figer,
   puis évaluer la période réservée UNE fois (`validate --holdout`).
+
+## Exploitation (3.1)
+- Volume PostgreSQL de 500 Mo : WAL plafonné à 64 Mo ; ne JAMAIS supprimer un fichier WAL à la main ; toute
+  intervention risquée après une sauvegarde vérifiée (workflow « Sauvegarde de la base »).
+- Le workflow nocturne n'appelle que `stockhunter pipeline nightly` ; `tests/test_workflows.py` l'impose.
+- Rétention : uniquement des données techniques ; jamais prix, scans, signaux, trades, résultats, registre.
+- Rapport 3.1 : docs/v3/rapport-v3-1.md.
 
 ## Règles de recherche (v3)
 - Toute hypothèse est écrite dans docs/research/ et commitée AVANT d'être exécutée ; tout test va dans

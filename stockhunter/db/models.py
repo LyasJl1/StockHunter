@@ -572,6 +572,7 @@ class DiscoveryOutcome(Base):
     r_multiple: Mapped[float | None] = mapped_column(Float)   # P&L net ÷ risque initial
     ret_20: Mapped[float | None] = mapped_column(Float)       # rendement à 20 séances (ouverture J+1 -> clôture J+20)
     excess_20: Mapped[float | None] = mapped_column(Float)    # idem, moins l'univers équipondéré
+    spy_20: Mapped[float | None] = mapped_column(Float)       # rendement du SPY sur la même fenêtre (référence)
     detail: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

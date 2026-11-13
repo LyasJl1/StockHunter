@@ -62,3 +62,36 @@ def test_failure_is_recorded_before_notifications_so_alert_goes_out_same_night(e
         return 1 if argv[0] == "c" else 0
     assert pipeline.run(engine, STEPS, runner) == 1
     assert seen["status"] == "failed"
+
+
+def test_already_processed_session_is_skipped_unless_forced(engine):
+    """Créneaux de secours : une séance entièrement traitée ne relance ni collecte ni scan (quotas, doublons)."""
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 14, 6, 0, tzinfo=timezone.utc)              # samedi matin : séance attendue = 13/11
+    calls = []
+    runner = lambda argv: calls.append(argv[0]) or 0
+    assert pipeline.run(engine, STEPS, runner, now=now) == 0 and len(calls) == 4
+    assert pipeline.run(engine, STEPS, runner, now=now) == 0 and len(calls) == 4       # rien refait
+    assert pipeline.run(engine, STEPS, runner, now=now, force=True) == 0 and len(calls) == 8
+    later = datetime(2026, 11, 17, 23, 30, tzinfo=timezone.utc)          # lundi soir : nouvelle séance
+    assert pipeline.run(engine, STEPS, runner, now=later) == 0 and len(calls) == 12
+
+
+def test_partial_run_is_retried_by_the_next_slot(engine):
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 14, 6, 0, tzinfo=timezone.utc)
+    calls = []
+    pipeline.run(engine, STEPS, lambda argv: calls.append(argv[0]) or (2 if argv[0] == "a" else 0), now=now)
+    pipeline.run(engine, STEPS, lambda argv: calls.append(argv[0]) or 0, now=now)
+    assert calls.count("a") == 2                                          # quota atteint au 1er passage : repris
+
+
+def test_critical_storage_halts_writes_but_still_alerts(engine):
+    steps = (Step("stockage", "0", ("chk",), True, warn_codes=(2,), halt_codes=(3,)), Step("a", "1", ("a",), True),
+             Step("notifications", "7", ("n",), True))
+    calls = []
+    code = pipeline.run(engine, steps, lambda argv: calls.append(argv[0]) or (3 if argv[0] == "chk" else 0))
+    assert calls == ["chk", "n"] and code == 1                     # aucune écriture lourde, alerte envoyée, job rouge
+    with session_scope(engine) as s:
+        last = json.loads(s.get(KeyValue, pipeline.KV).value)
+    assert last["steps"][1]["status"] == "warning" and "arrêtée" in last["steps"][1]["error"]

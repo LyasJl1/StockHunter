@@ -29,8 +29,11 @@
     {% for k, r in v.discovery.items() %}<tr><td>{{ k }}<div class="sub">{{ r.lecture }}</div></td><td class="r">{{ r.signaux }}</td><td class="r">{{ r.finalises }}</td><td class="r">{{ r.trades }}</td>
       <td class="r">{{ r.gagnants|pct(0, false) if r.gagnants is not none else '—' }}</td><td class="r">{{ r.r_moyen|num(2) if r.r_moyen is not none else '—' }}</td>
       <td class="r">{{ r.exces_20j_moyen|pct(2) if r.exces_20j_moyen is not none else '—' }}</td></tr>{% endfor %}</table>
+    {% set a = v.discovery_all %}{% if a %}<p class="sub" style="margin-top:10px"><b>Ensemble</b> : {{ a.signaux }} signaux · {{ a.executes }} exécutés · {{ a.annules }} annulés · {{ a.en_cours }} en cours · gagnants {{ a.gagnants|pct(0, false) if a.gagnants is not none else '—' }} · R moyen {{ a.r_moyen|num(2) if a.r_moyen is not none else '—' }} (médian {{ a.r_median|num(2) if a.r_median is not none else '—' }}) · R cumulé {{ a.r_cumule|num(1) if a.r_cumule is not none else '—' }} · drawdown {{ a.drawdown_r|num(1) if a.drawdown_r is not none else '—' }} R · excès 20 j vs univers {{ a.exces_20j_moyen|pct(2) if a.exces_20j_moyen is not none else '—' }}, vs SPY {{ a.vs_spy_20j_moyen|pct(2) if a.vs_spy_20j_moyen is not none else '—' }}</p>{% endif %}
+    {% if v.discovery_month %}<table style="margin-top:6px"><tr><th>Mois du signal</th><th class="r">Signaux</th><th class="r">Trades</th><th class="r">R moyen</th><th class="r">vs SPY 20 j</th></tr>
+    {% for k, r in v.discovery_month|dictsort %}<tr><td>{{ k }}</td><td class="r">{{ r.signaux }}</td><td class="r">{{ r.trades }}</td><td class="r">{{ r.r_moyen|num(2) if r.r_moyen is not none else '—' }}</td><td class="r">{{ r.vs_spy_20j_moyen|pct(2) if r.vs_spy_20j_moyen is not none else '—' }}</td></tr>{% endfor %}</table>{% endif %}
     {% else %}<p class="muted">Aucun signal enregistré pour l'instant.</p>{% endif %}
-    <p class="sub">Résultat simulé de chaque signal suivi jusqu'à son terme (règles communes, frais inclus). Descriptif tant que l'échantillon est petit.</p></div>
+    <p class="sub">Résultat simulé de chaque signal suivi jusqu'à son terme (règles communes, frais et glissement inclus ; risque fixe par signal). Excès bruts de frais. Descriptif tant que l'échantillon est petit : ce n'est pas une validation.</p></div>
 </div>
 <div class="card" style="margin-top:16px"><h2>Exécutions du laboratoire</h2>
   <table><tr><th>Date</th><th>Programme</th><th>Code</th><th>Données</th><th>Durée</th><th>Résumé</th></tr>

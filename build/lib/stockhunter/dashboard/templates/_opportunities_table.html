@@ -1,0 +1,18 @@
+<div class="card">
+<p class="sub">{{ rows|length }} action(s){% if meta %} · scan du {{ meta.as_of|d }} · {{ meta.version }} [{{ meta.stage }}]{% endif %} · sous-scores : T technique, F fondamentaux, C catalyseurs, V volume, M marché, R risque (100 = faible)</p>
+<table>
+<tr><th>Action</th><th class="r">Clôture</th><th class="r">Score</th><th class="hide-sm">T · F · C · V · M · R</th><th>Stratégies</th>
+<th class="r hide-sm">Volatilité</th><th class="r hide-sm">Réaction résultats</th><th>Statut</th></tr>
+{% for r in rows %}
+<tr>
+  <td><a href="/stock/{{ r.symbol }}"><b>{{ r.symbol }}</b></a><div class="sub">{{ (r.name or '')[:28] }}</div></td>
+  <td class="r">{{ r.close|num }} $<div class="sub">{{ r.price_date|d }}</div></td>
+  <td class="r"><b>{{ r.total|num(0) }}</b><div class="bar"><i style="width:{{ (r.total or 0)|round }}%"></i></div></td>
+  <td class="hide-sm sub">{% for k in ['technical','fundamental','catalyst','volume_liquidity','market_sector','risk_quality'] %}{{ r.sub[k]|num(0) if r.sub[k] is not none else 'N/D' }}{{ ' · ' if not loop.last }}{% endfor %}</td>
+  <td>{{ r.active|join(', ') or '—' }}</td>
+  <td class="r hide-sm">{{ r.atr|pct(1, false) }}</td>
+  <td class="r hide-sm">{{ r.catalyst|num(0) if r.catalyst is not none else '—' }}</td>
+  <td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
+</tr>
+{% else %}<tr><td colspan="8" class="muted">Aucune action ne correspond aux filtres.</td></tr>{% endfor %}
+</table></div>

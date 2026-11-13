@@ -1,20 +1,19 @@
 name: Ingestion
 
-# Collecte réelle des données. Stockage provisoire GRATUIT : la base SQLite est conservée d'un run à l'autre
-# via le cache GitHub Actions (éviction après 7 jours sans run) et publiée en artefact téléchargeable.
-# Remplacement prévu : PostgreSQL (Railway) en phase 7, après validation du coût.
+# Chaîne nocturne StockHunter 3.1 : `stockhunter pipeline nightly` (stockhunter/pipeline.py).
+# Base de production : PostgreSQL Railway (secret SH_DATABASE_URL). Le cache Actions ne conserve que les données
+# de marché large (Parquet) et le cache HTTP. Un test (tests/test_workflows.py) vérifie ce fichier.
 
 on:
   workflow_dispatch:
     inputs:
-      what:
-        description: "Données à collecter"
-        default: all
-        type: choice
-        options: [all, prices, fundamentals, macro, earnings]
+      force:
+        description: "Relancer toute la chaîne même si la séance a déjà été traitée"
+        type: boolean
+        default: false
   schedule:
-    # Après les clôtures US de lun–ven. Deux passages car l'univers (58 symboles) dépasse
-    # le quota Tiingo Free de 50 req/h : le 2e run termine les symboles restants.
+    # Après les clôtures US de lun–ven. Plusieurs passages : quota Tiingo de 50 req/h (58 symboles) et retards
+    # de GitHub. Un passage dont la séance est déjà entièrement traitée s'arrête en quelques secondes.
     # GitHub retarde souvent les tâches planifiées (jusqu'à plusieurs heures) : plusieurs créneaux à des minutes
     # « creuses ». Un passage inutile ne coûte rien : séries déjà à jour ignorées, scan déjà fait non refait.
     - cron: "17 23 * * 1-5"
@@ -25,6 +24,11 @@ on:
 concurrency:
   group: ingestion          # jamais deux ingestions en parallèle sur la même base
   cancel-in-progress: false
+
+
+# Jeton GitHub en lecture seule : aucun workflow n'écrit dans le dépôt.
+permissions:
+  contents: read
 
 jobs:
   ingest:
@@ -60,36 +64,13 @@ jobs:
       - name: Migrations
         run: stockhunter init-db
 
-      - name: Entretien de la base (plafond des journaux PostgreSQL, nettoyage)
-        run: stockhunter db tune || echo "::warning::entretien de la base non effectué"
-
-      - name: Univers
-        run: stockhunter sync-universe || echo "::warning::sync-universe partiel"
-
-      - name: Ingestion
-        run: stockhunter ingest ${{ inputs.what || 'all' }} || echo "::warning::ingestion partielle (quota atteint ou erreurs, voir le log)"
-
-      - name: Univers large (séances du marché US manquantes, max 4 appels)
-        run: stockhunter market sync --max-calls 4 || echo "::warning::univers large non à jour (voir le log)"
-
-      - name: Contrôles qualité
-        run: stockhunter quality || echo "::warning::anomalies critiques détectées"
-
-      - name: Scanner (classement multicritère)
-        # Ne score que si toutes les séries de prix sont à jour (sinon le 2e passage du soir s'en charge)
-        run: stockhunter scan --if-new --require-fresh || echo "::warning::scan non exécuté (voir le log)"
-
-      - name: Paper trading (plans des signaux READY, suivi des positions)
-        run: stockhunter paper run || echo "::warning::paper trading en erreur"
-
-      - name: Test prospectif (paniers hebdomadaires des facteurs pré-enregistrés)
-        run: stockhunter forward record || echo "::warning::test prospectif non mis à jour"
-
-      - name: Rétention (journal des appels API et anomalies résolues de plus de 30 jours)
-        run: stockhunter prune --days 30 || true
-
-      - name: Rapport et alertes Telegram
-        run: stockhunter notify evening || echo "::warning::notifications en erreur"
+      - name: Chaîne nocturne v3 (entretien → collecte → qualité → sélection → simulation → suivi → rapports)
+        id: pipeline
+        # Une seule commande : chaque étape est exécutée et consignée en base (page Santé), les étapes critiques
+        # en échec font sortir la commande en erreur. `continue-on-error` laisse le rapport et la sauvegarde du cache
+        # se faire ; la DERNIÈRE étape rend alors le job rouge. Aucun `|| echo` : rien n'est masqué.
+        continue-on-error: true
+        run: stockhunter pipeline nightly ${{ inputs.force && '--force' || '' }}
 
       - name: Rapport
         if: always()
@@ -121,7 +102,7 @@ jobs:
       # interdisent la redistribution. Les données restent dans le cache Actions et la base Railway.
 
       - name: Échec si une étape critique de la chaîne a échoué
-        if: steps.pipeline.outcome == 'failure'
+        if: always() && steps.pipeline.outcome == 'failure'
         run: |
           echo "::error::Une étape critique de la chaîne nocturne a échoué (voir l'étape « Chaîne nocturne » et la page Santé du dashboard)."
           exit 1

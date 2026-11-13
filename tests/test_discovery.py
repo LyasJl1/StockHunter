@@ -164,3 +164,78 @@ def test_telegram_scanner_and_signal_trace_origin_and_result(engine, panel):
     assert (" R" in sig or "annulé" in sig) and "<b>Corp</b>" not in sig          # résultat tracé ; HTML échappé
     assert "jamais été relevée" in answer(engine, "/signal NOPE") and "Usage" in answer(engine, "/signal")
     assert "/scanner" in answer(engine, "/help")
+
+
+def test_performance_metrics_come_from_simulated_trades_and_are_consistent(engine, panel):
+    """Les indicateurs (exécutés, annulés, gagnants, R, drawdown en R, excès vs univers et vs SPY) sont recalculés
+    à partir des résultats simulés enregistrés ; les découpages par catégorie et par mois somment au total."""
+    for k in (90, 70):
+        past = panel.truncate(panel.close.index[-k])
+        dstore.save(engine, disc.run(past))
+    dstore.update_outcomes(engine, panel)
+    with session_scope(engine) as s:
+        outs = list(s.scalars(select(DiscoveryOutcome)))
+    tot = dstore.performance(engine, by="all")["tous"]
+    closed = [o for o in outs if o.final and o.r_multiple is not None]
+    assert tot["trades"] == len(closed) > 0
+    assert tot["r_cumule"] == pytest.approx(sum(o.r_multiple for o in closed))
+    assert tot["r_moyen"] == pytest.approx(sum(o.r_multiple for o in closed) / len(closed))
+    assert tot["gagnants"] == pytest.approx(sum(o.r_multiple > 0 for o in closed) / len(closed))
+    assert tot["drawdown_r"] <= 0 and tot["executes"] >= tot["trades"]
+    assert tot["annules"] == sum(o.final and o.status == "CANCELLED" for o in outs)
+    assert all(o.spy_20 is not None for o in outs if o.ret_20 is not None)
+    assert tot["vs_spy_20j_moyen"] == pytest.approx(
+        sum(o.ret_20 - o.spy_20 for o in outs if o.final and o.ret_20 is not None) /
+        sum(1 for o in outs if o.final and o.ret_20 is not None))
+    for by in ("category", "month"):
+        parts = dstore.performance(engine, by=by)
+        assert sum(p["signaux"] for p in parts.values()) == tot["signaux"]
+        assert sum(p["trades"] for p in parts.values()) == tot["trades"]
+
+
+def test_paper_risk_stats(engine):
+    from stockhunter.portfolio import paper
+    assert paper.risk_stats(engine)["seances"] == 0
+
+
+def test_ranking_is_reproducible(panel):
+    a = json.dumps(disc.run(panel), default=str, sort_keys=True)
+    b = json.dumps(disc.run(panel), default=str, sort_keys=True)
+    assert a == b
+
+
+def test_split_does_not_create_fake_signals():
+    """Un split 4:1 (cours brut divisé par 4) ne doit produire ni « choc », ni sortie de consolidation, ni
+    rendement extrême : le panel travaille en prix ajustés."""
+    long, tickers = synthetic_long(n_tickers=150, n_sessions=430, drift_scale=0.0, seed=11)
+    days = sorted(long["date"].unique())
+    d_split = days[-10]
+    m = (long["ticker"] == "ZZ005") & (long["date"] >= d_split)
+    for col in ("open", "high", "low", "close"):
+        long.loc[m, col] = long.loc[m, col] / 4
+    long.loc[m, "volume"] *= 4
+    splits = pd.DataFrame([{"ticker": "ZZ005", "execution_date": pd.Timestamp(d_split).date(), "split_from": 1, "split_to": 4}])
+    p = build_panel(long, splits, tickers)
+    res = disc.run(p)
+    picked = {c["ticker"] for v in res["categories"].values() for c in v["candidats"]}
+    assert "ZZ005" not in picked or all(abs(c["metrics"]["ret_1m"] or 0) < 0.5 for v in res["categories"].values()
+                                        for c in v["candidats"] if c["ticker"] == "ZZ005")
+    r = p.close["ZZ005"].pct_change().abs().max()
+    assert r < 0.2                                                       # aucun saut de −75 % dans les prix ajustés
+
+
+def test_delisted_candidate_is_finalised_at_last_price(engine, panel):
+    """Un titre relevé puis radié (plus de cotation) : le signal est finalisé au dernier cours connu, pas laissé
+    ouvert indéfiniment."""
+    past = panel.truncate(panel.close.index[-40])
+    res = disc.run(past)
+    dstore.save(engine, res)
+    t = res["categories"]["momentum"]["candidats"][0]["ticker"]
+    gone = panel.truncate(panel.close.index[-1])
+    for frame in (gone.open, gone.high, gone.low, gone.close):
+        frame.loc[gone.close.index[-37]:, t] = np.nan                      # radié 3 séances après le signal
+    dstore.update_outcomes(engine, gone)
+    with session_scope(engine) as s:
+        c = s.scalars(select(DiscoveryCandidate).where(DiscoveryCandidate.ticker == t)).first()
+        o = s.get(DiscoveryOutcome, c.id)
+    assert o.final and o.status in ("CLOSED", "CANCELLED") and ("radiation" in (o.detail or "") or o.status == "CANCELLED")

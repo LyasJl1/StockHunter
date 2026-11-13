@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro n(x, d=1) %}{{ x|num(d) if x is not none else 'N/D' }}{% endmacro %}
+<p><a href="/scanner">← Scanner</a>{% if v.tracked %} · <a href="/stock/{{ v.ticker }}">fiche de l'univers suivi (score détaillé)</a>{% endif %}</p>
+<h1 style="margin:0">{{ v.ticker }} <span class="muted" style="font-weight:400">{{ v.name or '' }}</span></h1>
+{% set c0 = v.cards[0] %}{% set deep = v.deep or {} %}
+<p class="sub">{{ (deep.societe or {}).activite or 'Secteur non disponible pour l\'univers large' }} · taille : {{ c0.tier }} · relevée le {{ v.as_of|d }} dans : {% for c in v.cards %}<b>{{ {'momentum':'Momentum','breakout':'Sortie de consolidation','steady':'Tendance régulière','shock':'Choc d\'information','watch':'À surveiller'}[c.category] }}</b> (rang {{ c.rank }}){{ ', ' if not loop.last }}{% endfor %}</p>
+<div class="banner">Stratégies non validées (voir Laboratoire) : cette fiche décrit une configuration et un plan <b>simulé</b>, pas une recommandation d'achat.</div>
+<div class="grid g4">
+  <div class="card"><h2>Clôture</h2><div class="kpi">{{ c0.close|num }} $</div><div class="sub">séance du {{ v.as_of|d }} — pas un cours en direct</div></div>
+  <div class="card"><h2>Rang</h2><div class="kpi">{{ c0.rank }}<span class="sub"> dans sa catégorie</span></div><div class="sub">classement relatif, pas une probabilité</div></div>
+  <div class="card"><h2>Confiance des données</h2><div class="kpi">{{ (c0.confidence * 100)|round|int }} %</div><div class="sub">{{ c0.metrics.history_sessions }} séances d'historique · cotation continue</div></div>
+  <div class="card"><h2>Risque estimé</h2><div class="kpi">{{ (c0.plan.risque_pct * 100)|num(1) }} %</div><div class="sub">distance du stop (2 × amplitude quotidienne moyenne de {{ ((c0.metrics.atr_pct or 0) * 100)|num(1) }} %)</div></div>
+</div>
+<div class="card" style="margin-top:16px"><h2>Cours (clôtures) et moyennes 50 / 200 jours</h2>
+  {% if deep.series %}<canvas id="px" height="90"></canvas><p class="sub">{{ deep.series.note }} · source : Massive (données de fin de journée), au {{ v.deep_as_of|d }}</p>
+  {% else %}<p class="muted">Série non disponible.</p>{% endif %}</div>
+<div class="grid g2" style="margin-top:16px">
+  <div class="card"><h2>Pourquoi elle ressort</h2><ul class="reasons">{% for c in v.cards %}{% for r in c.pos %}<li>{{ r }}</li>{% endfor %}{% endfor %}</ul>
+    <h2 style="margin-top:14px">Pourquoi rester prudent</h2><ul class="reasons">{% for r in c0.neg %}<li>{{ r }}</li>{% else %}<li class="muted">Aucun point de vigilance technique relevé.</li>{% endfor %}
+    {% for f in (deep.depots or []) if f.vigilance %}<li>Dépôt SEC du {{ f.date }} : {{ f.label }} — <a href="{{ f.url }}" target="_blank" rel="noopener">lire</a></li>{% endfor %}</ul></div>
+  <div class="card"><h2>Plan simulé (sans argent réel)</h2><table>
+    <tr><td>Zone d'entrée (ouverture suivante)</td><td class="r"><b>{{ c0.plan.entry_min|num }} – {{ c0.plan.entry_max|num }} $</b></td></tr>
+    <tr><td>Invalidation / annulation</td><td class="r">{{ c0.plan.annulation }}</td></tr>
+    <tr><td>Stop (si entrée au cours de clôture)</td><td class="r">{{ c0.plan.stop_si_entree_au_cours|num }} $ ({{ (c0.plan.risque_pct * -100)|num(1) }} %)</td></tr>
+    <tr><td>Objectifs</td><td class="r">{{ c0.plan.tp1|num }} $ puis {{ c0.plan.tp2|num }} $</td></tr>
+    <tr><td>Rendement / risque</td><td class="r">{{ c0.plan.ratio_rendement_risque }}</td></tr>
+    <tr><td>Horizon d'observation</td><td class="r">{{ c0.plan.horizon_seances }} séances max</td></tr></table>
+    <p class="sub">Niveaux calculés par règle (R = 2 × ATR) ; stop suiveur à 3 × ATR sous la plus haute clôture. Objectifs non validés statistiquement.</p></div>
+  <div class="card"><h2>Technique et comparaison</h2><table>
+    <tr><td>1 mois / 3 mois / 6 mois</td><td class="r">{{ c0.metrics.ret_1m|pct }} / {{ c0.metrics.ret_3m|pct }} / {{ c0.metrics.ret_6m|pct }}</td></tr>
+    <tr><td>3 mois vs marché (SPY)</td><td class="r">{{ c0.metrics.rs_spy_3m|pct }}</td></tr>
+    <tr><td>Écart à la moyenne 50 jours</td><td class="r">{{ c0.metrics.ext_sma50|pct }}</td></tr>
+    <tr><td>Moyennes 50 j / 200 j</td><td class="r">{{ n(c0.metrics.sma50, 2) }} / {{ n(c0.metrics.sma200, 2) }} $</td></tr>
+    <tr><td>Rang tendance / momentum propre</td><td class="r">{{ n((c0.metrics.rank_trend or 0) * 100, 0) }} / {{ n((c0.metrics.rank_resid_mom or 0) * 100, 0) }} sur 100</td></tr>
+    <tr><td>Rang de volatilité (bas = calme)</td><td class="r">{{ n((c0.metrics.rank_volatility or 0) * 100, 0) }} sur 100</td></tr>
+    <tr><td>Volume échangé médian</td><td class="r">{{ n((c0.metrics.dollar_vol_med20 or 0) / 1e6, 1) }} M$/jour</td></tr></table>
+    <p class="sub">Rangs calculés dans l'univers négociable du jour. Comparaison sectorielle non disponible pour l'univers large (secteurs non fournis par la source gratuite).</p></div>
+  <div class="card"><h2>Fondamentaux (SEC)</h2>
+    {% set fd = deep.fondamentaux %}
+    {% if fd and fd.disponible %}<table>
+      <tr><td>Trimestre clos le</td><td class="r">{{ fd.last_quarter_end or 'N/D' }} (déposé le {{ fd.last_filed or 'N/D' }})</td></tr>
+      <tr><td>Chiffre d'affaires (sur un an)</td><td class="r">{{ fd.revenue_yoy_q|pct }}</td></tr>
+      <tr><td>Bénéfice par action (sur un an)</td><td class="r">{{ fd.eps_yoy_q|pct }}</td></tr>
+      <tr><td>Marge opérationnelle 12 mois</td><td class="r">{{ fd.op_margin_ttm|pct(1, false) }}</td></tr>
+      <tr><td>Rentabilité des fonds propres</td><td class="r">{{ fd.roe_ttm|pct(1, false) }}</td></tr>
+      <tr><td>PER / cours-ventes</td><td class="r">{{ n(fd.pe_ttm) }} / {{ n(fd.ps_ttm) }}</td></tr>
+      <tr><td>Rendement du cash-flow libre</td><td class="r">{{ fd.fcf_yield|pct(1, false) }}</td></tr></table>
+      <p class="sub">Source : <a href="{{ fd.url }}" target="_blank" rel="noopener">{{ fd.source }}</a>, analyse du {{ deep.approfondi_le or v.deep_as_of }}.</p>
+    {% elif fd %}<p class="muted">Aucune donnée comptable exploitable chez la SEC pour ce titre.</p>
+    {% else %}<p class="muted">Analyse fondamentale réservée aux 3 premiers de chaque catégorie (analyse approfondie des meilleurs candidats seulement).</p>{% endif %}</div>
+</div>
+<div class="grid g2" style="margin-top:16px">
+  <div class="card"><h2>Catalyseurs : dépôts SEC récents</h2><table>
+    {% for f in deep.depots or [] %}<tr><td>{{ f.date }}</td><td>{{ f.form }}{% if f.label %} · {{ f.label }}{% endif %}{% if f.vigilance %} ⚠️{% endif %}</td><td><a href="{{ f.url }}" target="_blank" rel="noopener">document</a></td></tr>
+    {% else %}<tr><td class="muted">{{ 'Aucun dépôt sur 120 jours.' if deep.depots is defined else 'Non collecté pour ce titre.' }}</td></tr>{% endfor %}</table></div>
+  <div class="card"><h2>Actualités récentes</h2><table>
+    {% for a in deep.actualites or [] %}<tr><td class="sub">{{ a.date }}</td><td><a href="{{ a.url }}" target="_blank" rel="noopener">{{ a.headline }}</a><div class="sub">{{ a.publisher or 'éditeur N/D' }} via Finnhub · type : {{ a.category }}</div></td></tr>
+    {% else %}<tr><td class="muted">{{ 'Aucun article sur 10 jours.' if deep.actualites is defined else 'Non collecté pour ce titre.' }}</td></tr>{% endfor %}</table>
+    <p class="sub">Articles classés par mots-clés du titre ; aucun avis positif ou négatif n'en est déduit.</p></div>
+</div>
+{% if deep.erreurs %}<p class="sub error">Collecte incomplète : {{ deep.erreurs|join(' ; ') }}</p>{% endif %}
+<div class="card" style="margin-top:16px"><h2>Historique des signaux et de leur résultat</h2>
+  <table><tr><th>Date</th><th>Catégorie</th><th class="r">Rang</th><th class="r">Clôture</th><th>Résultat du plan simulé</th><th class="r">R</th><th class="r">20 séances vs univers</th></tr>
+  {% for h in v.history %}<tr><td>{{ h.as_of|d }}</td><td>{{ h.category }}</td><td class="r">{{ h.rank }}</td><td class="r">{{ h.close|num }} $</td>
+    <td class="sub">{% if h.status %}{{ {'PLANNED':'en attente d\'entrée','OPEN':'position simulée ouverte','CLOSED':'clos','CANCELLED':'annulé'}[h.status] }}{% if h.entry %} · entrée {{ h.entry|d }}{% endif %}{% if h.exit %} · sortie {{ h.exit|d }}{% endif %}{% if h.detail %} · {{ h.detail }}{% endif %}{% else %}pas encore suivi{% endif %}</td>
+    <td class="r {{ 'pos' if (h.r or 0) > 0 else 'neg' if (h.r or 0) < 0 }}">{{ h.r|num(2) if h.r is not none else '—' }}</td>
+    <td class="r">{{ h.excess_20|pct if h.excess_20 is not none else '—' }}</td></tr>{% endfor %}</table>
+  <p class="sub">Chaque signal est figé le jour de son émission puis suivi jusqu'à son terme avec les règles de trading communes (suivi unitaire, risque fixe, frais et glissement inclus).</p></div>
+{% if deep.series %}<script nonce="{{ request.state.nonce }}">
+const p = JSON.parse({{ series|tojson }});
+const css = getComputedStyle(document.documentElement);
+new Chart(document.getElementById('px'), {type: 'line', data: {labels: p.dates, datasets: [
+  {label: 'Clôture', data: p.close, borderColor: css.getPropertyValue('--accent'), borderWidth: 1.6, pointRadius: 0},
+  {label: 'MM50', data: p.sma50, borderColor: css.getPropertyValue('--warn'), borderWidth: 1, pointRadius: 0},
+  {label: 'MM200', data: p.sma200, borderColor: css.getPropertyValue('--muted'), borderWidth: 1, pointRadius: 0}]},
+  options: {animation: false, interaction: {mode: 'index', intersect: false}, scales: {x: {ticks: {maxTicksLimit: 8}}}}});
+</script>{% endif %}
+{% endblock %}

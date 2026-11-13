@@ -1,0 +1,88 @@
+name: Sauvegarde de la base
+
+# Sauvegarde logique de PostgreSQL (pg_dump, format compressé), VÉRIFIÉE par restauration complète dans une base
+# PostgreSQL 18 temporaire et comparaison du nombre de lignes de chaque table. Conservée dans le cache Actions
+# (non téléchargeable publiquement ; JAMAIS en artefact : dépôt public, données sous licence).
+# Option « entretien » : après une sauvegarde vérifiée, plafonne les WAL et lance les points de contrôle
+# (stockhunter db tune) — aucune donnée modifiée, réversible.
+on:
+  workflow_dispatch:
+    inputs:
+      entretien:
+        description: "Après la sauvegarde vérifiée, lancer l'entretien (plafond WAL, point de contrôle)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "41 11 * * 6"          # chaque samedi
+  push:
+    branches: [stockhunter-v3-1-fixes]
+    paths: ["docs/ops/maintenance/**"]
+
+concurrency:
+  group: ingestion
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 30
+    services:
+      verify:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: verify
+        ports: ["5544:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      SH_DATABASE_URL: ${{ secrets.SH_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[postgres]"
+
+      - name: Sauvegarde (pg_dump 18, format compressé)
+        run: |
+          test -n "$SH_DATABASE_URL" || { echo "::error::secret SH_DATABASE_URL absent"; exit 1; }
+          mkdir -p backup
+          url=$(python -c "import os;from stockhunter.db.session import normalize_url as n;print(n(os.environ['SH_DATABASE_URL']).replace('postgresql+psycopg://','postgresql://'))")
+          echo "::add-mask::$url"
+          docker run --rm --network host -v "$PWD/backup:/b" postgres:18 \
+            pg_dump --format=custom --compress=9 --no-owner --no-privileges -f /b/stockhunter.dump "$url"
+          ls -l backup/stockhunter.dump
+
+      - name: Vérification (restauration complète et comparaison table par table)
+        run: |
+          docker run --rm --network host -v "$PWD/backup:/b" -e PGPASSWORD=verify postgres:18 \
+            pg_restore --no-owner --no-privileges -h localhost -p 5544 -U postgres -d postgres /b/stockhunter.dump
+          python - <<'PY'
+          import os, sys
+          from stockhunter.db.copy import row_counts
+          from stockhunter.db.session import get_engine
+          src = row_counts(get_engine(os.environ["SH_DATABASE_URL"]))
+          dst = row_counts(get_engine("postgresql://postgres:verify@localhost:5544/postgres"))
+          bad = {t: (n, dst.get(t)) for t, n in src.items() if dst.get(t) != n}
+          print(f"{len(src)} tables, {sum(src.values())} lignes ; écarts : {bad or 'aucun'}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(f"Sauvegarde vérifiée : {len(src)} tables, {sum(src.values())} lignes, écarts : {bad or 'aucun'}\n")
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Conserver la sauvegarde (cache Actions, non public)
+        uses: actions/cache/save@v5
+        with:
+          path: backup
+          key: stockhunter-backup-${{ github.run_id }}
+
+      - name: Entretien (seulement après une sauvegarde vérifiée)
+        if: inputs.entretien || github.event_name == 'push'
+        run: |
+          stockhunter db tune | tee -a "$GITHUB_STEP_SUMMARY"
+          stockhunter db diag > diag.json
+          python -c "import json;d=json.load(open('diag.json'));print('WAL :',d['wal'],'| répertoire :',d['repertoire_donnees_mo'],'Mo | stockage :',d['stockage'],'| réglages :',{k:d['reglages'][k] for k in ('max_wal_size','min_wal_size')})" | tee -a "$GITHUB_STEP_SUMMARY"

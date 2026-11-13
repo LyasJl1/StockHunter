@@ -76,9 +76,89 @@ def test_tune_is_safe_on_any_database(engine):
     from stockhunter.db.copy import tune
     out = tune(engine, progress=lambda m: None)
     if engine.dialect.name == "postgresql":
-        assert out["base_apres_mo"] > 0
+        assert out["apres"]["repertoire_mo"] > out["apres"]["bases_mo"] > 0
+        assert out["apres"]["methode"] == "répertoire de données mesuré"
+        assert out["wal"]["segments_apres"] <= max(out["wal"]["segments_avant"], 4)
         with engine.connect() as c:
             from sqlalchemy import text
             assert c.execute(text("SHOW max_wal_size")).scalar() == "64MB"
     else:
         assert out == {}
+
+
+def test_storage_levels(engine, monkeypatch):
+    from stockhunter.db import copy as dbc
+    if engine.dialect.name != "postgresql":
+        assert dbc.storage(engine)["niveau"] == "ok"
+        return
+    used = dbc.storage(engine)["utilise_mo"]
+    assert dbc.storage(engine, volume_mb=used / 0.5)["niveau"] == "ok"
+    assert dbc.storage(engine, volume_mb=used / 0.85)["niveau"] == "attention"
+    assert dbc.storage(engine, volume_mb=used / 0.92)["niveau"] == "alerte"
+    assert dbc.storage(engine, volume_mb=used / 0.97)["niveau"] == "critique"
+    # VACUUM demandé mais marge insuffisante : non lancé (il a lui-même besoin de place)
+    monkeypatch.setenv("SH_DB_VOLUME_MB", str(used / 0.99))
+    out = dbc.tune(engine, progress=lambda m: None, vacuum=True)
+    assert out["vacuum"].startswith("non fait")
+
+
+def test_reclaim_wal_never_deletes_files_itself_and_shrinks_preallocated_segments(engine):
+    """Reproduit l'incident : beaucoup de segments WAL préalloués ; après plafonnement, `reclaim_wal` les rend
+    au disque par pg_switch_wal + CHECKPOINT (aucune suppression manuelle)."""
+    from sqlalchemy import text
+    from stockhunter.db import copy as dbc
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        c.execute(text("ALTER SYSTEM SET max_wal_size = '1GB'"))
+        c.execute(text("ALTER SYSTEM SET min_wal_size = '320MB'"))
+        c.execute(text("SELECT pg_reload_conf()"))
+        c.execute(text("CREATE TABLE IF NOT EXISTS zz_wal_load (x text)"))
+        for _ in range(14):                                      # ≈ 200 Mo de WAL
+            c.execute(text("INSERT INTO zz_wal_load SELECT repeat('x', 1000) FROM generate_series(1, 15000)"))
+        c.execute(text("CHECKPOINT"))                            # segments gardés, recyclés d'avance (min_wal_size)
+        c.execute(text("DROP TABLE zz_wal_load"))
+        before = int(c.execute(text("SELECT count(*) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{24}$'")).scalar())
+    try:
+        out = dbc.tune(engine, progress=lambda m: None)
+        assert before >= 10 and out["wal"]["segments_avant"] >= 10
+        assert out["wal"]["segments_apres"] <= 6 and out["wal"]["libere_mo"] >= 64
+    finally:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+            c.execute(text("ALTER SYSTEM RESET max_wal_size"))
+            c.execute(text("ALTER SYSTEM RESET min_wal_size"))
+            c.execute(text("SELECT pg_reload_conf()"))
+
+
+def test_prune_never_touches_signals_trades_or_market_data(engine, monkeypatch):
+    """Rétention : seules les données techniques anciennes partent ; signaux, trades, prix, scans restent."""
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func, select
+    from stockhunter.cli import main
+    from stockhunter.data.ingestion import ensure_sources
+    from stockhunter.db.models import (ApiCall, DiscoveryCandidate, DiscoveryDeep, DiscoveryRun, NewsItem,
+                                       NotificationLog, PriceBar)
+    from datetime import date
+    old = datetime.now(timezone.utc) - timedelta(days=400)
+    src = ensure_sources(engine)
+    with session_scope(engine) as s:
+        i = Instrument(symbol="ZZA")
+        s.add(i)
+        s.flush()
+        s.add(PriceBar(instrument_id=i.id, source_id=src["tiingo"], bar_date=date(2020, 1, 2), open=1, high=1, low=1, close=1, volume=1))
+        s.add(ApiCall(provider="tiingo", endpoint="/x", status_code=200, called_at=old))
+        s.add(NewsItem(instrument_id=i.id, source_id=src["finnhub"], external_id="1", published_at=old, headline="h",
+                       url="https://x", category="other"))
+        s.add(NotificationLog(dedup_key="k", kind="report_evening", text="t", status="SENT", created_at=old))
+        r = DiscoveryRun(as_of=date(2025, 1, 2), engine_version="3.0.0", universe_size=1, overview_json="{}", conclusion="c")
+        s.add(r)
+        s.flush()
+        s.add(DiscoveryCandidate(run_id=r.id, as_of=date(2025, 1, 2), ticker="ZZOLD", category="momentum", rank=1,
+                                 score=1, close=1, confidence=1, card_json="{}"))
+        s.add(DiscoveryDeep(ticker="ZZOLD", as_of=date(2025, 1, 2), payload="{}"))
+    monkeypatch.setenv("SH_DATABASE_URL", engine.url.render_as_string(hide_password=False))
+    assert main(["prune", "--days", "30"]) == 0
+    with session_scope(engine) as s:
+        cnt = lambda m: s.scalar(select(func.count()).select_from(m))
+        assert cnt(ApiCall) == cnt(NewsItem) == cnt(NotificationLog) == cnt(DiscoveryDeep) == 0
+        assert cnt(PriceBar) == 1 and cnt(DiscoveryRun) == 1 and cnt(DiscoveryCandidate) == 1

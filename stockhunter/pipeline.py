@@ -36,10 +36,13 @@ class Step:
     argv: tuple[str, ...]
     critical: bool
     warn_codes: tuple[int, ...] = (2,)
+    halt_codes: tuple[int, ...] = ()        # ce code arrête la chaîne (sauf l'étape notifications)
 
 
 NIGHTLY: tuple[Step, ...] = (
     Step("entretien", "0 base", ("db", "tune"), False),
+    # volume ≥ 95 % après entretien : on n'écrit plus rien (seule l'alerte part) plutôt que de saturer le disque
+    Step("stockage", "0 base", ("db", "check"), True, warn_codes=(2,), halt_codes=(3,)),
     Step("univers", "1 collecte", ("sync-universe",), False),
     Step("ingestion", "1 collecte", ("ingest", "all"), True),
     Step("marche_large", "1 collecte", ("market", "sync", "--max-calls", "4"), False),
@@ -53,10 +56,37 @@ NIGHTLY: tuple[Step, ...] = (
 )
 
 
-def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[list[str]], int] | None = None) -> int:
-    """Exécute les étapes dans l'ordre. Renvoie 0 si aucune étape critique n'a échoué, 1 sinon."""
+def expected_session(now: datetime | None = None):
+    from zoneinfo import ZoneInfo
+
+    from stockhunter.data.calendar import last_completed_session
+    now = now or datetime.now(timezone.utc)
+    return last_completed_session(now.astimezone(ZoneInfo("America/New_York")).date())
+
+
+def already_done(engine: Engine, now: datetime | None = None) -> str | None:
+    """Séance déjà entièrement traitée (chaîne terminée sans aucun échec ni étape partielle) : renvoie la séance."""
+    with session_scope(engine) as s:
+        kv = s.get(KeyValue, KV)
+        last = json.loads(kv.value) if kv else None
+    seance = str(expected_session(now))
+    if last and last.get("final") and last.get("status") == "success" and last.get("seance") == seance:
+        return seance
+    return None
+
+
+def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[list[str]], int] | None = None,
+        force: bool = False, now: datetime | None = None) -> int:
+    """Exécute les étapes dans l'ordre. Renvoie 0 si aucune étape critique n'a échoué, 1 sinon.
+    Si la séance attendue a déjà été entièrement traitée, ne refait rien (évite les doubles collectes des
+    créneaux de secours) sauf `force`."""
     if runner is None:
         from stockhunter.cli import main as runner
+    done = None if force else already_done(engine, now)
+    if done:
+        print(f"Séance du {done} déjà entièrement traitée : rien à faire (relancer avec --force pour forcer).")
+        return 0
+    seance = str(expected_session(now))
     started = datetime.now(timezone.utc)
     results: list[dict] = []
     with session_scope(engine) as s:
@@ -78,7 +108,8 @@ def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[lis
             jr.detail = detail or None
             if final:
                 jr.finished_at = datetime.now(timezone.utc)
-            payload = json.dumps({"started": started.isoformat(), "status": status, "final": final, "steps": results},
+            payload = json.dumps({"started": started.isoformat(), "seance": seance, "status": status, "final": final,
+                                  "steps": results},
                                  ensure_ascii=False)
             kv = s.get(KeyValue, KV)
             if kv is None:
@@ -87,7 +118,12 @@ def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[lis
                 kv.value = payload
         return status
 
+    halted = None
     for st in steps:
+        if halted and st.name != "notifications":
+            results.append({"name": st.name, "stage": st.stage, "critical": st.critical, "status": "warning",
+                            "error": f"non exécutée : {halted}", "seconds": 0.0})
+            continue
         if st.name == "notifications":
             record(final=False)                     # les pannes déjà connues partent dans l'alerte de ce soir
         t0 = time.monotonic()
@@ -97,6 +133,8 @@ def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[lis
             code = runner(list(st.argv))
             res["code"] = code
             res["status"] = "ok" if code == 0 else ("warning" if code in st.warn_codes else "failed")
+            if code in st.halt_codes:
+                halted = f"chaîne arrêtée par l'étape {st.name} (code {code})"
             if res["status"] == "failed":
                 res["error"] = f"code de sortie {code}"
         except SystemExit as exc:                    # argparse ou sys.exit dans une commande

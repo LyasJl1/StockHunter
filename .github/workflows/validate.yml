@@ -13,6 +13,11 @@ concurrency:
   group: ingestion          # même base que l'ingestion : jamais en parallèle
   cancel-in-progress: false
 
+
+# Jeton GitHub en lecture seule : aucun workflow n'écrit dans le dépôt.
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest

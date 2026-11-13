@@ -7,7 +7,7 @@ import httpx
 import pytest
 import respx
 from pydantic import SecretStr
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from stockhunter.db.models import NotificationLog
 from stockhunter.db.session import session_scope
@@ -172,3 +172,48 @@ def test_single_telegram_reader_lease(engine, settings):
         s.get(KeyValue, ne.READER_KEY).value = json.dumps(
             {"owner": "worker-b", "until": (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()})
     assert ne.process_commands(engine, Boom()) == 0
+
+
+class _Updates:
+    """Faux Telegram : renvoie les mises à jour à partir de l'offset demandé (comme getUpdates)."""
+    chat_id = "42"
+
+    def __init__(self, n=3, fail_after_enqueue_once=False):
+        self.items = [{"update_id": 100 + i, "message": {"chat": {"id": 42}, "text": "/status"}} for i in range(n)]
+        self.calls = 0
+
+    def updates(self, offset):
+        self.calls += 1
+        return [u for u in self.items if offset is None or u["update_id"] >= offset]
+
+
+def test_commands_are_answered_once_even_if_read_twice(engine, settings):
+    """Redéploiement ou reprise : les mêmes mises à jour relues ne produisent jamais de double réponse."""
+    from stockhunter.db.models import KeyValue, NotificationLog
+    from stockhunter.notifications import engine as ne
+    tg = _Updates()
+    assert ne.process_commands(engine, tg, owner="worker-a") == 3
+    with session_scope(engine) as s:                     # perte de l'offset (interruption avant son écriture)
+        s.delete(s.get(KeyValue, "telegram_offset"))
+    assert ne.process_commands(engine, tg, owner="worker-a") == 0
+    with session_scope(engine) as s:
+        n = s.scalar(select(func.count()).select_from(NotificationLog).where(NotificationLog.kind == "command"))
+        assert n == 3 and s.get(KeyValue, "telegram_offset").value == "103"
+
+
+def test_concurrent_workers_only_one_reads(engine, settings):
+    """Deux conteneurs (redéploiement Railway) tentent de lire en même temps : un seul obtient le bail."""
+    import threading
+    from stockhunter.notifications import engine as ne
+    results = {}
+    barrier = threading.Barrier(4)
+
+    def worker(name):
+        barrier.wait()
+        results[name] = ne.acquire_reader(engine, name, 90)
+    threads = [threading.Thread(target=worker, args=(f"worker-{i}",)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(results.values()) == 1, results
