@@ -152,3 +152,30 @@ def test_staleness_uses_new_york_day():
     evening = datetime(2026, 11, 12, 23, 20, tzinfo=UTC)          # 18 h 20 à New York : séance du 12 pas comptée
     assert staleness(date(2026, 11, 11), evening)["stale"] is False
     assert staleness(None, evening)["stale"] is True
+
+
+def test_alerts_never_come_from_press_are_capped_and_expire(engine):
+    """Non-régression du 13/11/2026 (41 alertes en une nuit) : presse hors alertes, plafond, alertes périmées."""
+    from stockhunter.notifications import engine as ne
+    _src, ids, _ = setup(engine, ("ZZA",))
+    srcs = ensure_sources(engine)
+    with session_scope(engine) as s:
+        for k in range(12):
+            _add_news(s, srcs["finnhub"], ids["ZZA"], f"p{k}", datetime(2026, 11, 2, 15, k, tzinfo=UTC),
+                      f"ZZA faces lawsuit number {k}", "legal")
+        for k in range(8):
+            _filing(s, srcs["sec_edgar"], ids["ZZA"], f"D{k}", SIG, "2.06", url=f"https://www.sec.gov/{k}")
+    assert enqueue_catalyst_alerts(engine) == ne.MAX_CATALYST_ALERTS          # 8 dépôts -> plafond ; 0 article
+    with session_scope(engine) as s:
+        rows = list(s.scalars(select(NotificationLog).where(NotificationLog.kind == "alert")))
+        assert all(r.dedup_key.startswith("catalyst:8k:") for r in rows)
+        rows[0].created_at = datetime.now(UTC) - timedelta(hours=30)           # jamais envoyée depuis 30 h
+        s.add(NotificationLog(dedup_key="catalyst:news:99", kind="alert", text="ancienne alerte presse", status="PENDING"))
+
+    class Client:
+        sent = []
+        def send(self, text):
+            self.sent.append(text)
+    out = ne.flush(engine, Client(), max_messages=15)
+    assert out["envoyes"] == ne.MAX_CATALYST_ALERTS - 1 and out["ignores"] == 2
+    assert not any("presse" in t for t in Client.sent)

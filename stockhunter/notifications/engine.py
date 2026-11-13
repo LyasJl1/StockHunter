@@ -98,6 +98,10 @@ def enqueue_trade_events(engine: Engine) -> int:
     return n
 
 
+MAX_CATALYST_ALERTS = 5
+ALERT_TTL_HOURS = 24          # une alerte non envoyée après 24 h n'est plus d'actualité : elle n'est pas envoyée
+
+
 def enqueue_catalyst_alerts(engine: Engine, lookback_days: int = 2) -> int:
     """Alerte sur un catalyseur important (hors simple publication de résultats) touchant une action READY,
     DEVELOPING ou en position simulée. Une seule alerte par événement (clé de déduplication)."""
@@ -113,9 +117,11 @@ def enqueue_catalyst_alerts(engine: Engine, lookback_days: int = 2) -> int:
         for sym, st in s.execute(select(Instrument.symbol, PaperTrade.status).join(PaperTrade, PaperTrade.instrument_id == Instrument.id)
                                  .where(PaperTrade.status.in_(("PLANNED", "OPEN")))):
             watched[sym] = f"position simulée {'ouverte' if st == 'OPEN' else 'planifiée'}"
+        # Alertes : dépôts officiels SEC uniquement. Les articles de presse (classement par mots-clés, trop bruité
+        # pour une alerte) restent dans le rapport quotidien et la synthèse. Plafond de sécurité par exécution.
         cats = [c for c in recent_catalysts(s, run.as_of - timedelta(days=lookback_days), run.as_of + timedelta(days=1),
-                                            set(watched))
-                if not c["earnings_only"] and (c["importance"] >= 3 or c["watch"])]
+                                            set(watched), include_news=False)
+                if not c["earnings_only"] and (c["importance"] >= 3 or c["watch"])][:MAX_CATALYST_ALERTS]
     n = 0
     for c in cats:
         text = (f"<b>STOCKHUNTER AI — Catalyseur {e(c['symbol'])}</b> ({e(watched[c['symbol']])})\n"
@@ -164,8 +170,20 @@ def client_from(settings: Settings, **kw) -> TelegramClient | None:
 def flush(engine: Engine, client: TelegramClient | None, max_messages: int = 15) -> dict[str, int]:
     out = {"envoyes": 0, "echecs": 0, "en_attente": 0, "ignores": 0}
     with session_scope(engine) as s:
-        pending = list(s.scalars(select(NotificationLog).where(NotificationLog.status == "PENDING")
-                                 .order_by(NotificationLog.id)))
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=ALERT_TTL_HOURS)
+        pending = []
+        for n in s.scalars(select(NotificationLog).where(NotificationLog.status == "PENDING").order_by(NotificationLog.id)):
+            created = n.created_at if n.created_at.tzinfo else n.created_at.replace(tzinfo=timezone.utc)
+            if n.kind == "alert" and n.dedup_key.startswith("catalyst:news:"):
+                n.status, n.error = "SKIPPED", "retirée : les alertes ne portent plus sur les articles de presse"
+                out["ignores"] += 1
+                continue
+            if n.kind == "alert" and created < cutoff:
+                n.status, n.error = "SKIPPED", f"périmée : non envoyée dans les {ALERT_TTL_HOURS} h"
+                out["ignores"] += 1
+                continue
+            pending.append(n)
+        s.flush()
         for n in pending:
             s.expunge(n)
     for i, n in enumerate(pending):

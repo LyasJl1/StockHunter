@@ -15,7 +15,7 @@ KEY_NEWS = {"legal", "regulatory", "mna", "guidance"}   # articles retenus pour 
 
 
 def recent_catalysts(s, start: date, end: date, symbols: set[str] | None = None,
-                     min_importance: int = 2) -> list[dict]:
+                     min_importance: int = 2, include_news: bool = True) -> list[dict]:
     """Événements datés de ]start, end] (dépôt SEC : date de dépôt ; article : date de publication à New York)."""
     out: list[dict] = []
     q = (select(Filing, Instrument.symbol).join(Instrument)
@@ -30,6 +30,8 @@ def recent_catalysts(s, start: date, end: date, symbols: set[str] | None = None,
                     "label": " ; ".join(c.label for c in cats), "importance": max(c.importance for c in cats),
                     "watch": any(c.watch for c in cats), "earnings_only": all(c.item == "2.02" for c in cats),
                     "url": f.url, "source": "SEC EDGAR"})
+    if not include_news:
+        return sorted(out, key=lambda c: (-c["importance"], -c["date"].toordinal(), c["symbol"]))
     lo = datetime.combine(start + timedelta(days=1), time(0), NY).astimezone(timezone.utc)
     hi = datetime.combine(end + timedelta(days=1), time(0), NY).astimezone(timezone.utc)
     q = (select(NewsItem, Instrument.symbol).join(Instrument)
