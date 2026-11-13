@@ -464,6 +464,35 @@ def SecEdgarProviderLazy(settings, engine):
     return SecEdgarProvider(settings, engine)
 
 
+def cmd_history(settings, engine, args) -> int:
+    """Historique long Tiingo, stocké hors base (Parquet). Plafonné en titres DISTINCTS nouveaux par mois."""
+    from stockhunter.data.http import ProviderError
+    from stockhunter.data.providers import TiingoProvider
+    from stockhunter.history.store import HistoryStore, candidate_tickers, fetch
+    from stockhunter.universe import load_universe
+    st = HistoryStore(settings.history_dir)
+    tracked = {u.symbol for u in load_universe(settings.universe_file)}
+    if args.action == "status":
+        m = st.manifest()
+        print(f"Historique long : {len(st.tickers())} titres, {st.size_mb()} Mo ; nouveaux symboles par mois : "
+              f"{ {k: len(v) for k, v in m['symboles_du_mois'].items()} }")
+        return 0
+    if args.tickers:
+        tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+    else:
+        tickers = candidate_tickers(engine, settings.market_dir, args.sample)
+    try:
+        tg = TiingoProvider(settings, engine)
+    except ProviderError as exc:
+        print(f"IGNORÉ : {exc}")
+        return 2
+    out = fetch(st, tg, tickers, date.fromisoformat(args.start), args.max_new, already_used=tracked)
+    print(f"Collecte : {len(out['collectes'])} titre(s) ; déjà présents {out['ignores_deja_presents']} ; "
+          f"plafond atteint : {out['plafond_atteint']} ; nouveaux symboles ce mois : {out['nouveaux_symboles_ce_mois']} ; "
+          f"erreurs : {out['erreurs'] or 'aucune'} ; stockage {st.size_mb()} Mo")
+    return 2 if out["erreurs"] else 0
+
+
 def cmd_pipeline(settings, engine, args) -> int:
     from stockhunter import pipeline
     return pipeline.run(engine, force=args.force)
@@ -521,6 +550,12 @@ def add_parsers(sub) -> dict:
     an.add_argument("symbol")
     an.add_argument("--as-of", help="date AAAA-MM-JJ (point-in-time), défaut : dernier scan")
     an.add_argument("--out", help="fichier Markdown")
+    hi = sub.add_parser("history", help="historique long (Tiingo, Parquet hors base), collecte plafonnée")
+    hi.add_argument("action", choices=["fetch", "status"])
+    hi.add_argument("--tickers", help="liste explicite (sinon : échantillon des plus liquides de l'univers large)")
+    hi.add_argument("--sample", type=int, default=400)
+    hi.add_argument("--max-new", type=int, default=0, help="titres DISTINCTS nouveaux autorisés ce mois (défaut 0)")
+    hi.add_argument("--start", default="2014-01-01")
     dc = sub.add_parser("discover", help="moteur de découverte v3 (univers large, multi-catégories)")
     dc.add_argument("action", choices=["run", "status"])
     pl = sub.add_parser("pipeline", help="chaîne nocturne complète (collecte → rapports), échecs critiques non masqués")
@@ -562,6 +597,6 @@ def add_parsers(sub) -> dict:
     cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
     cp.add_argument("action", choices=["copy-to", "tune", "diag", "check"])
     cp.add_argument("target", nargs="?", help="copy-to : URL de la base cible, déjà migrée et vide")
-    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "pipeline": cmd_pipeline, "discover": cmd_discover, "validate": cmd_validate, "market": cmd_market,
+    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "pipeline": cmd_pipeline, "discover": cmd_discover, "history": cmd_history, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
             "dashboard": cmd_dashboard, "db": cmd_db}

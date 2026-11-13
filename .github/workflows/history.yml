@@ -1,0 +1,77 @@
+name: Historique long
+
+# Collecte de l'historique long (Tiingo, ≥ 10 ans, ajusté splits et dividendes) dans var/history (Parquet), HORS de
+# la base PostgreSQL. Plafonnée en titres distincts NOUVEAUX par mois (quota gratuit Tiingo) : 0 par défaut.
+# Lancement manuel uniquement, après accord d'Ilias sur le plafond.
+on:
+  workflow_dispatch:
+    inputs:
+      max_new:
+        description: "Titres distincts NOUVEAUX autorisés ce mois-ci (quota Tiingo gratuit partagé avec les 58 suivis)"
+        default: "0"
+      tickers:
+        description: "Liste explicite (vide = échantillon des plus liquides de l'univers large)"
+        default: ""
+  push:
+    branches: [stockhunter-v3-1-fixes]
+    paths: ["docs/ops/history/**"]
+
+concurrency:
+  group: history
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  history:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 300
+    env:
+      SH_DATABASE_URL: sqlite:///var/stockhunter.db     # copie locale du cache (référentiel Massive) : jamais la production
+      SH_MARKET_DIR: var/market
+      SH_HISTORY_DIR: var/history
+      SH_CACHE_DIR: var/cache
+      SH_TIINGO_API_KEY: ${{ secrets.SH_TIINGO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Données de marché (lecture)
+        uses: actions/cache/restore@v5
+        with:
+          path: var
+          key: stockhunter-db-${{ github.run_id }}
+          restore-keys: stockhunter-db-
+      - name: Historique déjà collecté
+        uses: actions/cache/restore@v5
+        with:
+          path: var/history
+          key: stockhunter-history-${{ github.run_id }}
+          restore-keys: stockhunter-history-
+      - run: stockhunter init-db
+      - name: Collecte
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # essai : 3 titres DÉJÀ suivis chaque soir -> aucun symbole nouveau consommé
+            stockhunter history fetch --tickers SPY,AAPL,JPM --max-new 0
+          else
+            stockhunter history fetch --max-new "${{ inputs.max_new }}" ${{ inputs.tickers && format('--tickers {0}', inputs.tickers) || '' }}
+          fi
+          stockhunter history status | tee -a "$GITHUB_STEP_SUMMARY"
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          from stockhunter.history.store import HistoryStore
+          st = HistoryStore("var/history")
+          for t in st.tickers()[:3]:
+              df = st.read(t)
+              print(f"{t} : {len(df)} séances {df.index[0].date()} -> {df.index[-1].date()}, "
+                    f"dividendes {int((df['div_cash'] > 0).sum())}, splits {int((df['split_factor'] != 1).sum())}")
+          PY
+      - name: Conserver l'historique (cache Actions, non public)
+        uses: actions/cache/save@v5
+        with:
+          path: var/history
+          key: stockhunter-history-${{ github.run_id }}
