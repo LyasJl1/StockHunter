@@ -114,6 +114,7 @@ def lab_view(engine: Engine) -> dict[str, Any]:
             for e in reg["experiences"]]
     return {"experiments": exps, "holdouts": reg["periodes_reservees"], "runs": reg.get("executions", []),
             "n_tests": len(registry.tests(reg)), "forward": fwd, "discovery": performance(engine),
+            "discovery_all": performance(engine, by="all").get("tous"), "discovery_month": performance(engine, by="month"),
             "validated": [e for e in exps if e["decision"].startswith(("VALIDÉ", "CONFIRMÉ"))]}
 
 

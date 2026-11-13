@@ -164,3 +164,35 @@ def test_telegram_scanner_and_signal_trace_origin_and_result(engine, panel):
     assert (" R" in sig or "annulé" in sig) and "<b>Corp</b>" not in sig          # résultat tracé ; HTML échappé
     assert "jamais été relevée" in answer(engine, "/signal NOPE") and "Usage" in answer(engine, "/signal")
     assert "/scanner" in answer(engine, "/help")
+
+
+def test_performance_metrics_come_from_simulated_trades_and_are_consistent(engine, panel):
+    """Les indicateurs (exécutés, annulés, gagnants, R, drawdown en R, excès vs univers et vs SPY) sont recalculés
+    à partir des résultats simulés enregistrés ; les découpages par catégorie et par mois somment au total."""
+    for k in (90, 70):
+        past = panel.truncate(panel.close.index[-k])
+        dstore.save(engine, disc.run(past))
+    dstore.update_outcomes(engine, panel)
+    with session_scope(engine) as s:
+        outs = list(s.scalars(select(DiscoveryOutcome)))
+    tot = dstore.performance(engine, by="all")["tous"]
+    closed = [o for o in outs if o.final and o.r_multiple is not None]
+    assert tot["trades"] == len(closed) > 0
+    assert tot["r_cumule"] == pytest.approx(sum(o.r_multiple for o in closed))
+    assert tot["r_moyen"] == pytest.approx(sum(o.r_multiple for o in closed) / len(closed))
+    assert tot["gagnants"] == pytest.approx(sum(o.r_multiple > 0 for o in closed) / len(closed))
+    assert tot["drawdown_r"] <= 0 and tot["executes"] >= tot["trades"]
+    assert tot["annules"] == sum(o.final and o.status == "CANCELLED" for o in outs)
+    assert all(o.spy_20 is not None for o in outs if o.ret_20 is not None)
+    assert tot["vs_spy_20j_moyen"] == pytest.approx(
+        sum(o.ret_20 - o.spy_20 for o in outs if o.final and o.ret_20 is not None) /
+        sum(1 for o in outs if o.final and o.ret_20 is not None))
+    for by in ("category", "month"):
+        parts = dstore.performance(engine, by=by)
+        assert sum(p["signaux"] for p in parts.values()) == tot["signaux"]
+        assert sum(p["trades"] for p in parts.values()) == tot["trades"]
+
+
+def test_paper_risk_stats(engine):
+    from stockhunter.portfolio import paper
+    assert paper.risk_stats(engine)["seances"] == 0

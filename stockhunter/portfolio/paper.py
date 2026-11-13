@@ -343,3 +343,23 @@ def equity_curve(engine: Engine, cfg: PaperConfig | None = None) -> list[dict[st
                     mtm += (closes[t.id][max(known)] - entry) * held
         out.append({"date": d.isoformat(), "equity": cfg.capital + realized + mtm, "spy": spy_close.get(d)})
     return out
+
+
+def risk_stats(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER) -> dict:
+    """Risque et comparaison du portefeuille simulé, à partir de sa courbe de capital (transactions simulées) :
+    rendement, drawdown maximal, volatilité, rendement du SPY sur la même période. Rien si moins de 2 séances."""
+    import math
+    curve = equity_curve(engine, cfg)
+    if len(curve) < 2:
+        return {"seances": len(curve)}
+    eq = [c["equity"] for c in curve]
+    peak, dd = eq[0], 0.0
+    for v in eq:
+        peak = max(peak, v)
+        dd = min(dd, v / peak - 1)
+    rets = [b / a - 1 for a, b in zip(eq, eq[1:]) if a]
+    vol = (sum((r - sum(rets) / len(rets)) ** 2 for r in rets) / max(1, len(rets) - 1)) ** 0.5 * math.sqrt(252)
+    spy = [c["spy"] for c in curve if c["spy"] is not None]
+    return {"seances": len(curve), "debut": curve[0]["date"], "fin": curve[-1]["date"],
+            "rendement": eq[-1] / eq[0] - 1, "drawdown_max": dd, "volatilite_annualisee": vol,
+            "spy": (spy[-1] / spy[0] - 1) if len(spy) >= 2 else None}
