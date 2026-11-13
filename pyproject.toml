@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.1"]
-dev = ["pytest>=8", "respx>=0.21"]
+dev = ["pytest>=8", "respx>=0.21", "pyyaml>=6"]
 research = ["scikit-learn>=1.4"]   # gradient boosting du laboratoire (optionnel)
 
 [project.scripts]
