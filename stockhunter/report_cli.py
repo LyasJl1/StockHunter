@@ -64,7 +64,7 @@ def cmd_scan(settings, engine, args) -> int:
                 if stale:
                     print(f"Scan reporté : {len(stale)} série(s) de prix pas à jour au {target} "
                           f"({', '.join(stale[:10])}{'…' if len(stale) > 10 else ''}).")
-                    return 0
+                    return 2          # partiel attendu : le passage suivant terminera (quota horaire des prix)
             if args.if_new and (prev := existing_scan(engine, target)):
                 print(f"Scan déjà réalisé pour le {target} (#{prev}) : rien à faire.")
                 return 0

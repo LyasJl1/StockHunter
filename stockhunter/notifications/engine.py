@@ -329,8 +329,11 @@ def run_notifications(engine: Engine, settings: Settings, kind: str, now: dateti
     paris = now.astimezone(PARIS)
     client = client or client_from(settings)
     out: dict = {"rapport": None}
-    if kind == "morning" and not force and paris.hour != settings.report_morning_hour_paris:
-        out["rapport"] = f"ignoré : il est {paris:%H:%M} à Paris (rapport prévu à {settings.report_morning_hour_paris} h)"
+    # GitHub lance parfois les tâches planifiées avec plusieurs heures de retard : le rapport du matin part dès
+    # l'heure prévue et jusqu'à midi (une seule fois par jour grâce à la clé de déduplication), jamais avant.
+    h = settings.report_morning_hour_paris
+    if kind == "morning" and not force and not (h <= paris.hour < 12):
+        out["rapport"] = f"ignoré : il est {paris:%H:%M} à Paris (rapport du matin entre {h} h et 12 h)"
     elif kind == "morning" and paris.weekday() >= 5 and not force:
         out["rapport"] = "ignoré : week-end"
     else:

@@ -1,10 +1,12 @@
 name: Rapport du matin
 
-# 8 h à Paris en semaine. GitHub planifie en UTC : on lance à 6 h ET 7 h UTC et le programme n'agit qu'à
-# l'heure de Paris voulue (8 h en heure d'été = 6 h UTC, 8 h en heure d'hiver = 7 h UTC).
+# Rapport du matin : à partir de 8 h à Paris, une seule fois par jour. GitHub planifie en UTC et avec des retards
+# parfois importants : plusieurs créneaux, le programme n'envoie qu'entre 8 h et 12 h (Paris) et déduplique.
 on:
   schedule:
-    - cron: "0 6,7 * * 1-5"
+    - cron: "7 6 * * 1-5"
+    - cron: "13 7 * * 1-5"
+    - cron: "43 8 * * 1-5"
   workflow_dispatch:
     inputs:
       force:
