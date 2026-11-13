@@ -60,12 +60,36 @@ jobs:
       - name: Migrations
         run: stockhunter init-db
 
-      - name: Chaîne nocturne (collecte → qualité → sélection → simulation → suivi → rapports)
-        id: pipeline
-        # Toutes les étapes s'exécutent et sont consignées ; la commande sort en erreur si une étape critique a
-        # échoué. `continue-on-error` laisse la sauvegarde du cache se faire, puis l'étape finale rend le job rouge.
-        continue-on-error: true
-        run: stockhunter pipeline nightly
+      - name: Entretien de la base (plafond des journaux PostgreSQL, nettoyage)
+        run: stockhunter db tune || echo "::warning::entretien de la base non effectué"
+
+      - name: Univers
+        run: stockhunter sync-universe || echo "::warning::sync-universe partiel"
+
+      - name: Ingestion
+        run: stockhunter ingest ${{ inputs.what || 'all' }} || echo "::warning::ingestion partielle (quota atteint ou erreurs, voir le log)"
+
+      - name: Univers large (séances du marché US manquantes, max 4 appels)
+        run: stockhunter market sync --max-calls 4 || echo "::warning::univers large non à jour (voir le log)"
+
+      - name: Contrôles qualité
+        run: stockhunter quality || echo "::warning::anomalies critiques détectées"
+
+      - name: Scanner (classement multicritère)
+        # Ne score que si toutes les séries de prix sont à jour (sinon le 2e passage du soir s'en charge)
+        run: stockhunter scan --if-new --require-fresh || echo "::warning::scan non exécuté (voir le log)"
+
+      - name: Paper trading (plans des signaux READY, suivi des positions)
+        run: stockhunter paper run || echo "::warning::paper trading en erreur"
+
+      - name: Test prospectif (paniers hebdomadaires des facteurs pré-enregistrés)
+        run: stockhunter forward record || echo "::warning::test prospectif non mis à jour"
+
+      - name: Rétention (journal des appels API et anomalies résolues de plus de 30 jours)
+        run: stockhunter prune --days 30 || true
+
+      - name: Rapport et alertes Telegram
+        run: stockhunter notify evening || echo "::warning::notifications en erreur"
 
       - name: Rapport
         if: always()
