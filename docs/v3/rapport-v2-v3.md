@@ -68,7 +68,7 @@ Aucun chiffre n'est estimé : « non mesuré » signifie qu'aucune mesure n'exis
 1. **Paniers figés** chaque semaine pour H1-H7, C, V2, V3, V4, V9, MF — en place depuis le 13/11/2026 ; lecture à
    26 puis 52 semaines avec le seuil inchangé.
 2. **Suivi unitaire des signaux du scanner** par catégorie (R moyen, excès à 20 séances) — en place.
-3. **Historique long** : ≈ 440 titres supplémentaires sur 10 ans via le quota gratuit Tiingo (500 symboles/mois),
+3. **Historique long** : ≈ 440 titres supplémentaires sur 10 ans via le plan gratuit Tiingo (limite mensuelle de symboles distincts à vérifier sur leur page de tarifs avant de lancer),
    choisis parmi les plus liquides de fin 2024, radiés compris. Donnerait plusieurs régimes de marché. Coût : 0 €,
    environ 10 h de collecte étalées. **À décider par Ilias** (consomme le quota mensuel de symboles).
 4. Période réservée de l'univers large (≥ 01/04/2026) : toujours intacte, à ne consulter que pour un candidat.

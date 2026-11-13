@@ -136,7 +136,6 @@ def test_login_rate_limit_uses_proxy_ip_and_global_cap(engine, settings):
 
 def test_v3_pages_render_with_discovery_data(engine, client):
     """Scanner, fiche approfondie, laboratoire, santé : rendu complet sur un classement SYNTHÉTIQUE."""
-    import json
     from stockhunter import pipeline
     from stockhunter.discovery import engine as disc
     from stockhunter.discovery import store as dstore
@@ -155,7 +154,7 @@ def test_v3_pages_render_with_discovery_data(engine, client):
     page = client.get("/scanner").text
     assert top in page and "pas une recommandation" in page and "NON RETENU" in page
     assert "<script>" not in page.split("</head>")[1].replace('<script nonce', '')   # nom de société échappé
-    assert client.get(f"/scanner?category=shock", headers={"HX-Request": "true"}).status_code == 200
+    assert client.get("/scanner?category=shock", headers={"HX-Request": "true"}).status_code == 200
     assert top not in client.get("/scanner?q=INEXISTANT", headers={"HX-Request": "true"}).text
     deep = client.get(f"/discover/{top}")
     assert deep.status_code == 200 and "Plan simulé" in deep.text and "Historique des signaux" in deep.text

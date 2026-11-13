@@ -151,7 +151,6 @@ def test_deep_dive_only_for_top_candidates_and_point_in_time(engine, panel):
 
 def test_telegram_scanner_and_signal_trace_origin_and_result(engine, panel):
     from stockhunter.notifications.engine import answer
-    from stockhunter.reports.daily import build_report
     assert "Aucun classement" in answer(engine, "/scanner")
     past = panel.truncate(panel.close.index[-70])
     res = disc.run(past, {t: f"{t} <b>Corp</b>" for t in panel.close.columns})
