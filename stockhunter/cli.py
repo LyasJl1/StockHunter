@@ -210,12 +210,30 @@ def cmd_verify_sources(settings: Settings, engine, args) -> int:
     return 0 if ok else 1
 
 
+NEWS_RETENTION_DAYS = 180         # titres d'articles : la synthèse et les alertes n'en lisent que 30 jours
+NOTIF_RETENTION_DAYS = 90         # journal technique des envois (les rapports eux-mêmes ne sont pas des signaux)
+DEEP_RETENTION_DAYS = 60          # analyse approfondie d'un titre qui n'est plus relevé par le scanner
+
+
 def cmd_prune(settings: Settings, engine, args) -> int:
-    cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
+    """Rétention des données TECHNIQUES uniquement. Jamais : prix, fondamentaux, dépôts SEC, scans, scores,
+    signaux de découverte et leurs résultats, trades simulés, paniers prospectifs, registre des expériences."""
+    from stockhunter.db.models import DiscoveryCandidate, DiscoveryDeep, NewsItem, NotificationLog
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=args.days)
     with session_scope(engine) as s:
         a = s.execute(delete(ApiCall).where(ApiCall.called_at < cutoff)).rowcount
         d = s.execute(delete(DataAnomaly).where(DataAnomaly.resolved_at < cutoff)).rowcount
-    print(f"Supprimés : {a} appels API, {d} anomalies résolues (> {args.days} j). Prix et fondamentaux conservés.")
+        n = s.execute(delete(NewsItem).where(NewsItem.published_at < now - timedelta(days=NEWS_RETENTION_DAYS))).rowcount
+        m = s.execute(delete(NotificationLog).where(
+            NotificationLog.created_at < now - timedelta(days=NOTIF_RETENTION_DAYS),
+            NotificationLog.status.in_(("SENT", "SKIPPED", "FAILED")))).rowcount
+        recent = select(DiscoveryCandidate.ticker).where(
+            DiscoveryCandidate.as_of >= (now - timedelta(days=DEEP_RETENTION_DAYS)).date())
+        g = s.execute(delete(DiscoveryDeep).where(DiscoveryDeep.ticker.not_in(recent))).rowcount
+    print(f"Supprimés : {a} appels API, {d} anomalies résolues (> {args.days} j), {n} articles (> {NEWS_RETENTION_DAYS} j), "
+          f"{m} notifications envoyées (> {NOTIF_RETENTION_DAYS} j), {g} analyses approfondies obsolètes. "
+          "Prix, fondamentaux, scans, signaux, trades et résultats conservés.")
     return 0
 
 

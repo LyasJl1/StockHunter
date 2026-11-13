@@ -128,3 +128,37 @@ def test_reclaim_wal_never_deletes_files_itself_and_shrinks_preallocated_segment
             c.execute(text("ALTER SYSTEM RESET max_wal_size"))
             c.execute(text("ALTER SYSTEM RESET min_wal_size"))
             c.execute(text("SELECT pg_reload_conf()"))
+
+
+def test_prune_never_touches_signals_trades_or_market_data(engine, monkeypatch):
+    """Rétention : seules les données techniques anciennes partent ; signaux, trades, prix, scans restent."""
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func, select
+    from stockhunter.cli import main
+    from stockhunter.data.ingestion import ensure_sources
+    from stockhunter.db.models import (ApiCall, DiscoveryCandidate, DiscoveryDeep, DiscoveryRun, NewsItem,
+                                       NotificationLog, PriceBar)
+    from datetime import date
+    old = datetime.now(timezone.utc) - timedelta(days=400)
+    src = ensure_sources(engine)
+    with session_scope(engine) as s:
+        i = Instrument(symbol="ZZA")
+        s.add(i)
+        s.flush()
+        s.add(PriceBar(instrument_id=i.id, source_id=src["tiingo"], bar_date=date(2020, 1, 2), open=1, high=1, low=1, close=1, volume=1))
+        s.add(ApiCall(provider="tiingo", endpoint="/x", status_code=200, called_at=old))
+        s.add(NewsItem(instrument_id=i.id, source_id=src["finnhub"], external_id="1", published_at=old, headline="h",
+                       url="https://x", category="other"))
+        s.add(NotificationLog(dedup_key="k", kind="report_evening", text="t", status="SENT", created_at=old))
+        r = DiscoveryRun(as_of=date(2025, 1, 2), engine_version="3.0.0", universe_size=1, overview_json="{}", conclusion="c")
+        s.add(r)
+        s.flush()
+        s.add(DiscoveryCandidate(run_id=r.id, as_of=date(2025, 1, 2), ticker="ZZOLD", category="momentum", rank=1,
+                                 score=1, close=1, confidence=1, card_json="{}"))
+        s.add(DiscoveryDeep(ticker="ZZOLD", as_of=date(2025, 1, 2), payload="{}"))
+    monkeypatch.setenv("SH_DATABASE_URL", engine.url.render_as_string(hide_password=False))
+    assert main(["prune", "--days", "30"]) == 0
+    with session_scope(engine) as s:
+        cnt = lambda m: s.scalar(select(func.count()).select_from(m))
+        assert cnt(ApiCall) == cnt(NewsItem) == cnt(NotificationLog) == cnt(DiscoveryDeep) == 0
+        assert cnt(PriceBar) == 1 and cnt(DiscoveryRun) == 1 and cnt(DiscoveryCandidate) == 1
