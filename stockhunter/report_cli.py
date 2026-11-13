@@ -305,7 +305,17 @@ def cmd_forward(settings, engine, args) -> int:
     try:
         if args.action == "record":
             print(f"Test prospectif : {forward.record(engine, st)} titre(s) figé(s) dans les paniers.")
-        print(forward.render(forward.report(engine, st)))
+        rep = forward.report(engine, st)
+        # résultat enregistré pour le dashboard (le serveur web n'a pas les données de marché complètes)
+        from stockhunter.db.models import KeyValue
+        payload = json.dumps({**rep, "libelles": forward.labels(), "genere_le": date.today().isoformat()}, ensure_ascii=False)
+        with session_scope(engine) as s:
+            kv = s.get(KeyValue, "forward_report")
+            if kv is None:
+                s.add(KeyValue(key="forward_report", value=payload))
+            else:
+                kv.value = payload
+        print(forward.render(rep))
     except RuntimeError as exc:
         print(f"IGNORÉ : {exc}")
         return 2

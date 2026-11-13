@@ -132,3 +132,43 @@ def test_login_rate_limit_uses_proxy_ip_and_global_cap(engine, settings):
     for i in range(30):
         c.post("/login", data={"password": "faux"}, headers={"X-Forwarded-For": f"9.9.{i}.9"})
     assert c.post("/login", data={"password": PW}, headers={"X-Forwarded-For": "8.8.8.8"}).status_code == 429
+
+
+def test_v3_pages_render_with_discovery_data(engine, client):
+    """Scanner, fiche approfondie, laboratoire, santé : rendu complet sur un classement SYNTHÉTIQUE."""
+    import json
+    from stockhunter import pipeline
+    from stockhunter.discovery import engine as disc
+    from stockhunter.discovery import store as dstore
+    from stockhunter.lab.panel import build_panel
+    from tests.test_lab import NO_SPLITS, synthetic_long
+    long, tickers = synthetic_long(n_tickers=150, n_sessions=430, drift_scale=0.0015)
+    p = build_panel(long, NO_SPLITS, tickers)
+    past = p.truncate(p.close.index[-60])
+    res = disc.run(past, {t: f"{t} Corp <script>" for t in tickers}, validation=dstore.registry_decisions())
+    dstore.save(engine, res)
+    dstore.deepen(engine, res, past)
+    dstore.update_outcomes(engine, p)
+    pipeline.run(engine, (pipeline.Step("a", "1 collecte", ("a",), True),), lambda argv: 0)
+    login(client)
+    top = res["categories"]["momentum"]["candidats"][0]["ticker"]
+    page = client.get("/scanner").text
+    assert top in page and "pas une recommandation" in page and "NON RETENU" in page
+    assert "<script>" not in page.split("</head>")[1].replace('<script nonce', '')   # nom de société échappé
+    assert client.get(f"/scanner?category=shock", headers={"HX-Request": "true"}).status_code == 200
+    assert top not in client.get("/scanner?q=INEXISTANT", headers={"HX-Request": "true"}).text
+    deep = client.get(f"/discover/{top}")
+    assert deep.status_code == 200 and "Plan simulé" in deep.text and "Historique des signaux" in deep.text
+    assert client.get("/discover/NOPE").status_code == 404
+    lab = client.get("/lab").text
+    assert "Aucune stratégie validée" in lab and "v3-V3" in lab and "INTACTE" in lab and "CONSOMMÉE" in lab
+    sysp = client.get("/system").text
+    assert "Chaîne nocturne" in sysp and "Quotas des sources" in sysp and "tiingo" in sysp
+    home = client.get("/").text
+    assert "Marché large" in home
+    assert "Journal de décision" in client.get("/portfolio").text
+    for path in ("/scanner", "/lab", "/system", f"/discover/{top}"):
+        assert client.get(path, follow_redirects=False).status_code == 200
+    c2 = TestClient(client.app)
+    for path in ("/scanner", "/lab", "/system", f"/discover/{top}"):
+        assert c2.get(path, follow_redirects=False).status_code == 303          # non connecté : redirection

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="banner">{% if v.validated %}{{ v.validated|length }} stratégie(s) confirmée(s) hors échantillon.{% else %}<b>Aucune stratégie validée à ce jour.</b> {{ v.n_tests }} tests statistiques ont été menés ; aucun n'atteint le seuil fixé à l'avance. Les sélections affichées ailleurs sont donc exploratoires.{% endif %}</div>
+<div class="grid g4" style="margin-bottom:16px">
+  <div class="card"><h2>Tests menés</h2><div class="kpi">{{ v.n_tests }}</div><div class="sub">tous enregistrés, retenus ou non (correction des tests multiples)</div></div>
+  <div class="card"><h2>Stratégies validées</h2><div class="kpi">{{ v.validated|length }}</div><div class="sub">seuil : t ≥ 3,0 puis confirmation hors échantillon</div></div>
+  {% for h in v.holdouts %}<div class="card"><h2>Période réservée</h2><div class="kpi" style="font-size:18px">{{ h.etat }}</div><div class="sub">{{ h.etude }} · à partir du {{ h.debut }}</div></div>{% endfor %}
+</div>
+<div class="card"><h2>Registre des expériences</h2>
+  <table><tr><th>Id</th><th>Hypothèse</th><th>Date</th><th class="r">Dates</th><th class="r">Stat.</th><th class="r">t</th><th class="r hide-sm">p</th><th class="r hide-sm">p Holm</th><th class="r hide-sm">Décile net vs univers</th><th>Décision</th></tr>
+  {% for e in v.experiments %}<tr><td>{{ e.id }}</td><td>{{ e.hypothese }}<div class="sub">{{ e.programme }}{% if e.reprise %} · repris du rapport{% endif %}</div></td><td class="sub">{{ e.date }}</td>
+    <td class="r">{{ e.dates if e.dates is defined else '—' }}</td><td class="r">{{ e.stat|num(3) if e.stat is defined and e.stat is not none else '—' }}</td>
+    <td class="r">{{ e.t|num(2) if e.t is defined and e.t is not none else '—' }}</td>
+    <td class="r hide-sm">{{ e.p|num(3) if e.p is defined else '—' }}</td><td class="r hide-sm">{{ e.holm|num(3) if e.holm is defined else '—' }}</td>
+    <td class="r hide-sm">{{ e.top_vs_univers_net_25pb|pct(2) if e.top_vs_univers_net_25pb is defined and e.top_vs_univers_net_25pb is not none else '—' }}</td>
+    <td><b>{{ e.decision }}</b></td></tr>{% endfor %}</table>
+  <p class="sub">Stat. = corrélation de rang moyenne entre le signal et le rendement à 20 séances (ou écart moyen pour un événement), dans le sens attendu. t = statistique de Newey-West. p Holm = p-valeur corrigée du nombre total de tests. Protocoles et rapports : dossier <code>docs/research/</code> du dépôt.</p></div>
+<div class="grid g2" style="margin-top:16px">
+  <div class="card"><h2>Test prospectif — paniers figés chaque semaine</h2>
+    {% if v.forward and v.forward.facteurs %}<p class="sub">{{ v.forward.dates }} date(s) de signal figée(s) · mis à jour le {{ v.forward.genere_le or '—' }}</p>
+    <table><tr><th>Facteur</th><th class="r">Dates mesurées</th><th class="r">Excès net 20 j</th><th class="r">t</th><th class="r">% positif</th></tr>
+    {% for k, r in v.forward.facteurs.items() %}{% set x = r['20'] if '20' in r else {} %}<tr><td>{{ k }} <span class="sub">{{ v.forward.libelles[k] if v.forward.libelles and k in v.forward.libelles else '' }}</span></td>
+      <td class="r">{{ x.dates_mesurees or 0 }}</td><td class="r">{{ x.excess_net_moyen|pct(2) if x.excess_net_moyen is not none else 'N/D' }}</td>
+      <td class="r">{{ x.t|num(2) if x.t is not none else 'N/D' }}</td><td class="r">{{ x.positif|pct(0, false) if x.positif is not none else 'N/D' }}</td></tr>{% endfor %}</table>
+    {% else %}<p class="muted">Paniers figés à partir du 13/11/2026. Aucun résultat mesurable avant 20 séances après chaque date.</p>{% endif %}
+    <p class="sub">Seule preuve recevable désormais : les paniers sont enregistrés avant que leur résultat soit connu. Pas de t avant 10 dates.</p></div>
+  <div class="card"><h2>Suivi des signaux du scanner, par catégorie</h2>
+    {% if v.discovery %}<table><tr><th>Catégorie</th><th class="r">Signaux</th><th class="r">Terminés</th><th class="r">Trades</th><th class="r">Gagnants</th><th class="r">R moyen</th><th class="r">Excès 20 j</th></tr>
+    {% for k, r in v.discovery.items() %}<tr><td>{{ k }}<div class="sub">{{ r.lecture }}</div></td><td class="r">{{ r.signaux }}</td><td class="r">{{ r.finalises }}</td><td class="r">{{ r.trades }}</td>
+      <td class="r">{{ r.gagnants|pct(0, false) if r.gagnants is not none else '—' }}</td><td class="r">{{ r.r_moyen|num(2) if r.r_moyen is not none else '—' }}</td>
+      <td class="r">{{ r.exces_20j_moyen|pct(2) if r.exces_20j_moyen is not none else '—' }}</td></tr>{% endfor %}</table>
+    {% else %}<p class="muted">Aucun signal enregistré pour l'instant.</p>{% endif %}
+    <p class="sub">Résultat simulé de chaque signal suivi jusqu'à son terme (règles communes, frais inclus). Descriptif tant que l'échantillon est petit.</p></div>
+</div>
+<div class="card" style="margin-top:16px"><h2>Exécutions du laboratoire</h2>
+  <table><tr><th>Date</th><th>Programme</th><th>Code</th><th>Données</th><th>Durée</th><th>Résumé</th></tr>
+  {% for r in v.runs %}<tr><td>{{ r.date }}</td><td>{{ r.programme }}</td><td><code>{{ r.commit }}</code></td><td class="sub">{{ r.donnees.seances }} séances, {{ r.donnees.titres }} titres, empreinte {{ r.donnees.empreinte }}</td><td>{{ r.duree_s }} s · {{ r.memoire_max_mo }} Mo</td><td class="sub">{{ r.resume }}</td></tr>
+  {% else %}<tr><td class="muted">Aucune.</td></tr>{% endfor %}</table></div>
+{% endblock %}

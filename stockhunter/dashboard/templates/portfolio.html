@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <p class="tabs"><a href="/portfolio?tab=paper" class="{{ 'on' if tab=='paper' }}">Portefeuille simulé (paper trading)</a>
+<a href="/performance">Performance simulée (courbe, drawdown, SPY)</a>
 <a href="/portfolio?tab=real" class="{{ 'on' if tab=='real' }}">Mes investissements (réel)</a></p>
 {% if tab == 'paper' %}
 <div class="banner">Simulation de stratégies NON validées. Aucun ordre réel. Distinct de ton portefeuille réel.</div>
@@ -17,7 +18,14 @@
 <td class="r {{ 'pos' if p.unrealized>0 else 'neg' }}">{{ p.unrealized|num(0) }} $</td><td class="r">{{ p.stop|num }}</td>
 <td class="r">{{ p.tp1|num }}{{ ' ✓' if p.tp1_done }}</td><td class="r">{{ p.tp2|num }}</td></tr>
 {% else %}<tr><td colspan="8" class="muted">Aucune position ouverte.</td></tr>{% endfor %}</table>
-<p class="sub">Règles : risque {{ (cfg.risk_fraction*100)|num(1) }} % du capital par position, {{ cfg.max_positions }} positions max, {{ cfg.max_per_sector }} par secteur, pas de levier. Modifiables dans Réglages.</p></div>
+<p class="sub">Règles : risque {{ (cfg.risk_fraction*100)|num(1) }} % du capital par position, {{ cfg.max_positions }} positions max, {{ cfg.max_per_sector }} par secteur, refus si corrélation 60 j > {{ cfg.max_correlation|num(2) }} avec une position ouverte, pas de levier, frais {{ cfg.cost_bps|num(0) }} pb + glissement {{ cfg.slippage_bps|num(0) }} pb. Modifiables dans Réglages. Mêmes règles que le backtest.</p></div>
+<div class="card" style="margin-top:16px"><h2>Journal de décision (immuable)</h2><table>
+<tr><th>Date</th><th>Action</th><th>Événement</th><th class="r">Prix</th><th class="r">Quantité</th><th>Pourquoi</th></tr>
+{% for j in journal %}<tr><td>{{ j.date|d }}</td><td><a href="/stock/{{ j.symbol }}"><b>{{ j.symbol }}</b></a></td>
+<td>{{ {'PLANNED': 'Plan créé', 'OPENED': 'Entrée', 'CANCELLED': 'Refusé / annulé', 'TP1': 'Objectif 1', 'CLOSED': 'Sortie', 'STOP_MOVED': 'Stop déplacé', 'SPLIT': 'Split'}.get(j.kind, j.kind) }}</td>
+<td class="r">{{ j.price|num if j.price is not none and j.kind != 'SPLIT' else '—' }}</td><td class="r">{{ j.shares|num(0) if j.shares is not none else '—' }}</td><td class="sub">{{ j.detail }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">Aucune décision enregistrée : aucun signal n'a encore donné lieu à un plan.</td></tr>{% endfor %}</table>
+<p class="sub">Chaque sélection, entrée, refus, modification et sortie est consignée avec son motif et n'est jamais réécrite.</p></div>
 {% else %}
 <div class="banner">Ton portefeuille réel, saisi à la main. Valorisé à la dernière clôture connue (datée). Jamais mélangé avec la simulation.</div>
 {% if error %}<p class="error">Opération refusée : {{ error }}</p>{% endif %}

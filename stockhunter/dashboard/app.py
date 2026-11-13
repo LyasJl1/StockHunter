@@ -72,6 +72,11 @@ def fr_time(t, fmt="%d/%m %H:%M"):
     return t.astimezone(PARIS).strftime(fmt)
 
 
+def _v3():
+    from stockhunter.dashboard import v3
+    return v3
+
+
 def create_app(engine: Engine, settings: Settings, secret: str | None = None, password_hash: str | None = None,
                secure_cookies: bool = True) -> FastAPI:
     secret = secret or (settings.dashboard_secret.get_secret_value() if settings.dashboard_secret else None)
@@ -160,7 +165,8 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
         active = [r for r in rows if r["status"] in ("READY", "DEVELOPING")]
         return render(request, "overview.html", sess, meta=meta, top=active[:5], n_active=len(active),
                       n_total=len(rows), pf=paper.summary(engine, paper.load_config(engine)),
-                      real=manual.portfolio(engine, settings.market_dir), fresh=queries.freshness(engine))
+                      real=manual.portfolio(engine, settings.market_dir), fresh=queries.freshness(engine),
+                      disc=_v3().discovery_view(engine))
 
     @app.get("/opportunities", response_class=HTMLResponse)
     def opportunities(request: Request, status: str = "", strategy: str = "", min_score: str = "", q: str = ""):
@@ -191,7 +197,8 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
         sess = guard(request)
         cfg = paper.load_config(engine)
         return render(request, "portfolio.html", sess, tab=tab, error=error, pf=paper.summary(engine, cfg), cfg=cfg,
-                      real=manual.portfolio(engine, settings.market_dir), today=date.today())
+                      real=manual.portfolio(engine, settings.market_dir), today=date.today(),
+                      journal=_v3().decision_journal(engine) if tab == "paper" else [])
 
     @app.post("/portfolio/transactions")
     def add_tx(request: Request, csrf: str = Form(""), symbol: str = Form(...), trade_date: str = Form(...),
@@ -258,6 +265,8 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
             return RedirectResponse(exc.headers["Location"], status_code=303)
         return HTMLResponse(f"<h1>{exc.status_code}</h1><p>{exc.detail}</p>", status_code=exc.status_code)
 
+    from stockhunter.dashboard import v3
+    v3.register(app, engine, settings, guard, render)
     return app
 
 

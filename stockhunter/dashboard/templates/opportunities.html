@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<div class="tabs" style="margin-bottom:14px"><a href="/scanner">Univers large</a><a class="on" href="/opportunities">Univers suivi (42 actions, score détaillé)</a></div>
 {% if meta %}<div class="banner">{{ meta.validation }}</div>{% endif %}
 <form class="filters" hx-get="/opportunities" hx-target="#tbl" hx-trigger="change, keyup changed delay:300ms from:input[name=q]">
   <input name="q" placeholder="Ticker ou société" value="{{ f.q }}">
