@@ -70,3 +70,34 @@ def copy_database(src: Engine, dst: Engine, progress=print) -> dict[str, int]:
     if diff:
         raise RuntimeError(f"contrôle échoué, lignes copiées vs présentes : {diff}")
     return copied
+
+
+WAL_SETTINGS = {"max_wal_size": "64MB", "min_wal_size": "32MB"}
+
+
+def tune(engine: Engine, progress=print) -> dict:
+    """Entretien PostgreSQL pour un petit volume (0,5 Go) : plafonne les journaux WAL (1 Go par défaut, ce qui a
+    saturé le disque le 13/11/2026), force un point de contrôle pour libérer l'espace et nettoie les tables.
+    Réversible (`ALTER SYSTEM RESET ...`). Aucune donnée n'est modifiée. Sans effet sur SQLite."""
+    if engine.dialect.name != "postgresql":
+        progress("Base SQLite : aucun réglage nécessaire.")
+        return {}
+    out = {}
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        def sizes(tag):
+            out[f"base_{tag}_mo"] = round(c.execute(text("SELECT pg_database_size(current_database())")).scalar() / 1048576, 1)
+            try:
+                out[f"wal_{tag}_mo"] = round((c.execute(text("SELECT COALESCE(sum(size), 0) FROM pg_ls_waldir()")).scalar() or 0) / 1048576, 1)
+            except Exception:                               # droit absent : information facultative
+                out[f"wal_{tag}_mo"] = None
+        sizes("avant")
+        for k, v in WAL_SETTINGS.items():
+            if c.execute(text(f"SHOW {k}")).scalar() != v:
+                c.execute(text(f"ALTER SYSTEM SET {k} = '{v}'"))
+        c.execute(text("SELECT pg_reload_conf()"))
+        c.execute(text("CHECKPOINT"))
+        c.execute(text("CHECKPOINT"))                       # le second recycle les segments libérés par le premier
+        c.execute(text("VACUUM (ANALYZE)"))
+        sizes("apres")
+    progress(f"Entretien PostgreSQL : {out}")
+    return out

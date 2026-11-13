@@ -352,8 +352,14 @@ def cmd_dashboard(settings, engine, args) -> int:
 
 
 def cmd_db(settings, engine, args) -> int:
-    from stockhunter.db.copy import copy_database
+    from stockhunter.db.copy import copy_database, tune
     from stockhunter.db.session import get_engine
+    if args.action == "tune":
+        tune(engine)
+        return 0
+    if not args.target:
+        print("ÉCHEC : URL de la base cible manquante")
+        return 1
     target = get_engine(args.target)
     print(f"Copie de {engine.url.render_as_string(hide_password=True)} vers "
           f"{target.url.render_as_string(hide_password=True)}")
@@ -427,8 +433,8 @@ def add_parsers(sub) -> dict:
     db.add_argument("--insecure-cookies", action="store_true", help="HTTP local uniquement (pas de HTTPS)")
     db.add_argument("--telegram-worker", action="store_true", help="répondre aux commandes Telegram en continu")
     cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
-    cp.add_argument("action", choices=["copy-to"])
-    cp.add_argument("target", help="URL de la base cible, déjà migrée et vide")
+    cp.add_argument("action", choices=["copy-to", "tune"])
+    cp.add_argument("target", nargs="?", help="copy-to : URL de la base cible, déjà migrée et vide")
     return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
             "dashboard": cmd_dashboard, "db": cmd_db}
