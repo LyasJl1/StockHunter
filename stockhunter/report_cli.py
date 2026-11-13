@@ -388,6 +388,90 @@ def cmd_analyse(settings, engine, args) -> int:
     return 0
 
 
+def cmd_discover(settings, engine, args) -> int:
+    """Moteur de découverte v3 : classement multi-catégories de l'univers large, analyse approfondie, suivi."""
+    from stockhunter.discovery import engine as disc
+    from stockhunter.discovery import store as dstore
+    from stockhunter.lab.panel import load_panel
+    from stockhunter.market.store import MarketStore
+    if args.action == "status":
+        perf = dstore.performance(engine)
+        if not perf:
+            print("Aucun signal de découverte enregistré.")
+        for cat, r in perf.items():
+            print(f"  {cat:10} signaux {r['signaux']:4}  finalisés {r['finalises']:4}  trades {r['trades']:4}  "
+                  f"R moyen {r['r_moyen'] if r['r_moyen'] is None else round(r['r_moyen'], 2)}  ({r['lecture']})")
+        return 0
+    try:
+        p = load_panel(engine, MarketStore(settings.market_dir))
+    except RuntimeError as exc:
+        print(f"IGNORÉ : {exc}")
+        return 2
+    res = disc.run(p, dstore.ticker_names(engine), validation=dstore.registry_decisions())
+    run_id, created = dstore.save(engine, res)
+    print(f"Découverte du {res['as_of']} : univers {res['univers']} titres, marché {res['marche']['regime']} "
+          f"({'enregistrée' if created else 'déjà enregistrée, non réécrite'}, #{run_id})")
+    for k, v in res["categories"].items():
+        names = ", ".join(c["ticker"] for c in v["candidats"][:10])
+        print(f"  {v['label']:36} admis {v['admis']:4}  {'SUSPENDUE' if v['suspendue'] else names or '—'}")
+    print(res["conclusion"])
+    if created:
+        sec = fin = None
+        try:
+            sec = SecEdgarProviderLazy(settings, engine)
+        except Exception as exc:
+            print(f"  analyse SEC indisponible : {exc}")
+        try:
+            from stockhunter.data.providers import FinnhubProvider
+            fin = FinnhubProvider(settings, engine)
+        except Exception as exc:
+            print(f"  actualités indisponibles : {exc}")
+        print(f"Analyse approfondie : {dstore.deepen(engine, res, p, sec, fin)}")
+    print(f"Suivi des signaux : {dstore.update_outcomes(engine, p)}")
+    return 0
+
+
+def SecEdgarProviderLazy(settings, engine):
+    from stockhunter.data.providers import SecEdgarProvider
+    return SecEdgarProvider(settings, engine)
+
+
+def cmd_pipeline(settings, engine, args) -> int:
+    from stockhunter import pipeline
+    return pipeline.run(engine)
+
+
+def cmd_lab(settings, engine, args) -> int:
+    """Laboratoire de recherche v3 : programme pré-enregistré sur l'univers large, registre des expériences."""
+    import json as _json
+
+    from stockhunter.lab import registry
+    if args.action == "registry":
+        reg = registry.load()
+        fam = registry.family_pvalues(reg)
+        print(f"{len(registry.tests(reg))} tests dans la famille ; périodes réservées :")
+        for h in reg["periodes_reservees"]:
+            print(f"  - {h['etude']} : {h['etat']}")
+        for e in reg["experiences"]:
+            p = fam.get(e["id"], {})
+            print(f"  {e['id']:14} {e.get('t') if e.get('t') is not None else '':>6}  "
+                  f"{('p=%.3f holm=%.3f' % (p['p'], p['holm'])) if p else '':24} {e['decision']}")
+        return 0
+    from stockhunter.lab.panel import load_panel
+    from stockhunter.lab.run import render, run_program
+    from stockhunter.market.store import MarketStore
+    end = date.fromisoformat(args.end) if args.end else None
+    res = run_program(load_panel(engine, MarketStore(settings.market_dir), end))
+    reg = registry.record_run(registry.load(), _json.loads(_json.dumps(res, default=str)))
+    text = render(res, registry.family_pvalues(reg))
+    if args.out:
+        Path(args.out).write_text(text)
+    if args.json:
+        Path(args.json).write_text(_json.dumps(res, default=str, ensure_ascii=False))
+    print(text)
+    return 0
+
+
 def add_parsers(sub) -> dict:
     sc = sub.add_parser("scan", help="calcule et enregistre le classement")
     sc.add_argument("--as-of", help="date d'analyse AAAA-MM-JJ (séance clôturée), défaut : dernière séance")
@@ -404,6 +488,15 @@ def add_parsers(sub) -> dict:
     an.add_argument("symbol")
     an.add_argument("--as-of", help="date AAAA-MM-JJ (point-in-time), défaut : dernier scan")
     an.add_argument("--out", help="fichier Markdown")
+    dc = sub.add_parser("discover", help="moteur de découverte v3 (univers large, multi-catégories)")
+    dc.add_argument("action", choices=["run", "status"])
+    pl = sub.add_parser("pipeline", help="chaîne nocturne complète (collecte → rapports), échecs critiques non masqués")
+    pl.add_argument("name", choices=["nightly"])
+    lb = sub.add_parser("lab", help="laboratoire de recherche v3 (programme pré-enregistré, registre)")
+    lb.add_argument("action", choices=["run", "registry"])
+    lb.add_argument("--end", help="dernière séance utilisée AAAA-MM-JJ (défaut : toutes)")
+    lb.add_argument("--out")
+    lb.add_argument("--json")
     va = sub.add_parser("validate", help="backtest du moteur de scoring réel (phase 3)")
     va.add_argument("--holdout", action="store_true", help="évalue aussi la période réservée (une fois, méthode figée)")
     va.add_argument("--allow-holdout-again", action="store_true")
@@ -435,6 +528,6 @@ def add_parsers(sub) -> dict:
     cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
     cp.add_argument("action", choices=["copy-to", "tune"])
     cp.add_argument("target", nargs="?", help="copy-to : URL de la base cible, déjà migrée et vide")
-    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "validate": cmd_validate, "market": cmd_market,
+    return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "pipeline": cmd_pipeline, "discover": cmd_discover, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
             "dashboard": cmd_dashboard, "db": cmd_db}

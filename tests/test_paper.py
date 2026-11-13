@@ -13,6 +13,7 @@ from stockhunter.portfolio import paper
 from stockhunter.portfolio.paper import PaperConfig
 
 SIG = date(2026, 11, 2)  # lundi
+NOSLIP = PaperConfig(slippage_bps=0.0)   # chiffres ronds pour les tests ; le glissement a ses propres tests
 
 
 def setup(engine, symbols=("ZZA",), sector="ZZSEC", close=100.0, atr_pct=0.02):
@@ -77,14 +78,14 @@ def test_full_lifecycle_tp1_then_breakeven_stop(engine):
         ("2026-11-04", 101, 106.5, 100.5, 105),  # TP1 : moitié vendue à 106, stop -> 100
         ("2026-11-05", 104, 104.5, 99.5, 100),   # stop à l'entrée touché
     ])
-    paper.process(engine)
+    paper.process(engine, NOSLIP)
     t = trade(engine, ids["ZZA"])
     # risque 0,5 % de 100 000 = 500 $ / 4 $ = 125 actions
     assert t.status == "CLOSED" and t.entry_price == 100 and t.tp1_done
     assert t.realized_pnl == pytest.approx(62 * 6.0)             # 62 actions vendues +6 $, 63 au prix d'entrée
-    assert kinds(engine, t.id) == ["PLANNED", "OPENED", "TP1", "CLOSED"]
-    paper.process(engine)                                         # idempotent : rien de nouveau
-    assert kinds(engine, t.id) == ["PLANNED", "OPENED", "TP1", "CLOSED"]
+    assert kinds(engine, t.id) == ["PLANNED", "OPENED", "TP1", "STOP_MOVED", "STOP_MOVED", "CLOSED"]
+    paper.process(engine, NOSLIP)                                 # idempotent : rien de nouveau
+    assert kinds(engine, t.id) == ["PLANNED", "OPENED", "TP1", "STOP_MOVED", "STOP_MOVED", "CLOSED"]
     sm = paper.summary(engine)
     assert sm["closed"] == 1 and sm["equity"] == pytest.approx(100_000 + 372 - t.costs)
 
@@ -93,7 +94,7 @@ def test_gap_below_stop_fills_at_open(engine):
     src, ids, run = setup(engine)
     paper.plan_from_scan(engine, run)
     bars(engine, src, ids["ZZA"], [("2026-11-03", 100, 101, 99, 100), ("2026-11-04", 90, 92, 89, 91)])
-    paper.process(engine)
+    paper.process(engine, NOSLIP)
     t = trade(engine, ids["ZZA"])
     assert t.status == "CLOSED" and "gap" in t.close_reason and t.realized_pnl == pytest.approx(-10 * 125)
 
@@ -112,10 +113,23 @@ def test_sector_limit_and_split(engine):
     paper.plan_from_scan(engine, run, PaperConfig(max_per_sector=2))
     for sym in ids:
         bars(engine, src, ids[sym], [("2026-11-03", 100, 101, 99, 100), ("2026-11-04", 50, 50.5, 49.5, 50, 2.0)])
-    paper.process(engine, PaperConfig(max_per_sector=2))
+    cfg = PaperConfig(max_per_sector=2, slippage_bps=0.0)
+    paper.process(engine, cfg)
     a, c = trade(engine, ids["ZZA"]), trade(engine, ids["ZZC"])
     assert c.status == "CANCELLED" and "secteur" in c.close_reason
     assert a.status == "OPEN" and a.shares == 250 and a.entry_price == 50 and a.stop == 48   # split 2:1
+    assert a.atr_at_signal == 1.0 and a.initial_risk == pytest.approx(500)   # ATR ajusté, risque en $ inchangé
+    # non-régression : la courbe de capital ne doit PAS voir de gain/perte fictif le jour du split
+    spy = Instrument(symbol="SPY", asset_type="etf")
+    with session_scope(engine) as s:
+        s.add(spy)
+        s.flush()
+        for d in ("2026-11-03", "2026-11-04"):
+            s.add(PriceBar(instrument_id=spy.id, source_id=src, bar_date=date.fromisoformat(d), open=1, high=1, low=1,
+                           close=1, volume=1))
+    curve = paper.equity_curve(engine, cfg)
+    costs = (125 + 124) * 100 * 10 / 1e4                  # deux positions ouvertes (125 et 124 actions), frais d'entrée
+    assert [round(x["equity"], 2) for x in curve] == [100_000 - costs, 100_000 - costs]
 
 
 def test_one_plan_per_instrument(engine):
@@ -132,3 +146,56 @@ def test_cancelled_signal_is_not_replanned_from_same_scan(engine):
     bars(engine, src, ids["ZZA"], [("2026-11-03", 110, 111, 109, 110)])
     paper.process(engine)
     assert paper.plan_from_scan(engine, run) == []   # relance du workflow : pas de nouveau plan
+
+
+# ----------------------------------------------------------------------------- règles partagées (v3)
+def test_rules_same_day_tp1_does_not_assume_intraday_order():
+    """TP1 touché et plus bas sous le prix d'entrée la même séance : on ne suppose PAS que le stop remonté a été
+    touché (ordre intrajournalier inconnu) ; le stop ne passe à l'entrée qu'à la séance suivante."""
+    from stockhunter.trading.rules import Bar, Rules, plan, step
+    r = Rules(slippage_bps=0)
+    p = plan(100.0, 2.0, r)
+    size = lambda fill, off: (100, None)
+    step(p, Bar(date(2026, 11, 3), 100, 101, 99, 100), size, r)
+    step(p, Bar(date(2026, 11, 4), 101, 106.5, 99.0, 105), size, r)      # TP1 (106) et plus bas 99 < entrée
+    assert p.status == "OPEN" and p.tp1_done and p.shares == 50 and p.stop == 99   # stop suiveur seul (105 − 3×ATR)
+    step(p, Bar(date(2026, 11, 5), 104, 105, 101, 104), size, r)
+    assert p.stop == 100                                                  # effectif le lendemain
+
+
+def test_rules_slippage_and_costs_are_adverse():
+    from stockhunter.trading.rules import Bar, Rules, plan, step
+    r = Rules(slippage_bps=10, cost_bps=10)
+    p = plan(100.0, 2.0, r)
+    step(p, Bar(date(2026, 11, 3), 100, 101, 99, 100), lambda f, o: (100, None), r)
+    assert p.entry_price == pytest.approx(100.10) and p.stop == pytest.approx(96.10)
+    step(p, Bar(date(2026, 11, 4), 99, 99, 95, 96), lambda f, o: (100, None), r)
+    assert p.status == "CLOSED" and p.realized == pytest.approx((96.10 * 0.999 - 100.10) * 100)
+    assert p.costs == pytest.approx((100.10 + 96.10 * 0.999) * 100 * 0.001)
+
+
+def test_rules_split_while_planned_and_open():
+    from stockhunter.trading.rules import Bar, Rules, plan, step
+    r = Rules(slippage_bps=0)
+    p = plan(100.0, 2.0, r)
+    step(p, Bar(date(2026, 11, 3), 50, 50.5, 49.5, 50, split=2.0), lambda f, o: (200, None), r)   # split avant l'entrée
+    assert p.status == "OPEN" and p.entry_price == 50 and p.stop == 48 and p.atr == 1.0
+    step(p, Bar(date(2026, 11, 4), 25, 25.2, 24.8, 25, split=2.0), lambda f, o: (0, None), r)     # split en position
+    assert p.shares == 400 and p.entry_price == 25 and p.stop == 24 and p.tp1 == 26.5 and p.initial_risk == 400
+
+
+def test_correlated_position_is_refused(engine):
+    src, ids, run = setup(engine, symbols=("ZZA", "ZZB"), sector=None)
+    with session_scope(engine) as s:   # 40 séances d'historique identiques -> corrélation 1
+        for k in range(40):
+            d = date(2026, 9, 1 + k) if k < 30 else date(2026, 10, k - 29)
+            px = 100 + (k % 7) - 0.3 * (k % 3)
+            for sym in ids:
+                s.add(PriceBar(instrument_id=ids[sym], source_id=src, bar_date=d, open=px, high=px, low=px, close=px,
+                               adj_close=px, volume=1e6))
+    paper.plan_from_scan(engine, run)
+    for sym in ids:
+        bars(engine, src, ids[sym], [("2026-11-03", 100, 101, 99, 100)])
+    paper.process(engine, NOSLIP)
+    a, b = trade(engine, ids["ZZA"]), trade(engine, ids["ZZB"])
+    assert a.status == "OPEN" and b.status == "CANCELLED" and "corrélée" in b.close_reason

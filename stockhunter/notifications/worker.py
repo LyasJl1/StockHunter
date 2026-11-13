@@ -7,6 +7,7 @@ Les réponses passent par la même file dédupliquée que les rapports (pas de d
 from __future__ import annotations
 
 import logging
+import secrets
 import threading
 import time
 
@@ -24,11 +25,17 @@ def start(engine: Engine, settings: Settings, interval_s: float = 3.0) -> thread
         log.info("Telegram non configuré : lecteur de commandes désactivé")
         return None
     client.poll_timeout = 25
+    owner = f"worker-{secrets.token_hex(4)}"   # un identifiant par processus : deux conteneurs ne lisent jamais ensemble
 
     def loop():
         while True:
             try:
-                if ne.process_commands(engine, client):
+                # bail de 90 s renouvelé à chaque tour ; pendant un redéploiement, le nouveau conteneur attend
+                # que le bail de l'ancien expire au lieu de provoquer des erreurs 409
+                if not ne.acquire_reader(engine, owner, 90):
+                    time.sleep(15)
+                    continue
+                if ne.process_commands(engine, client, owner=owner, ttl_s=90):
                     ne.flush(engine, client, settings.telegram_max_per_run)
             except Exception:  # le lecteur ne doit jamais faire tomber le dashboard
                 log.exception("lecteur de commandes Telegram")
