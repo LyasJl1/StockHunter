@@ -213,7 +213,8 @@ def flush(engine: Engine, client: TelegramClient | None, max_messages: int = 15)
 
 # --------------------------------------------------------------------------- commandes
 HELP = ("<b>Commandes StockHunter</b>\n/today — dernier rapport\n/top — classement du jour\n"
-        "/watchlist — actions en veille\n/portfolio — portefeuille simulé\n/analyse SYMBOLE — synthèse sourcée "
+        "/watchlist — actions en veille\n/scanner — opportunités de l'univers large\n/signal SYMBOLE — origine et "
+        "résultat d'un signal\n/portfolio — portefeuille simulé\n/analyse SYMBOLE — synthèse sourcée "
         "d'une action (ex. /analyse MA)\n/status — état du système\n\n"
         "<i>Réponse en quelques secondes quand le serveur Railway est actif ; sinon au prochain envoi planifié.</i>")
 
@@ -231,6 +232,12 @@ def answer(engine: Engine, cmd: str) -> str:
         sym = parts[1].upper()[:12]
         syn = build(engine, sym)
         return to_telegram(syn) if syn else f"{e(sym)} ne fait pas partie de l'univers suivi."
+    if cmd == "/scanner":
+        from stockhunter.discovery.telegram import scanner_message
+        return scanner_message(engine)
+    if cmd == "/signal":
+        from stockhunter.discovery.telegram import signal_message
+        return signal_message(engine, parts[1]) if len(parts) > 1 else "Usage : /signal SYMBOLE (ex. /signal NVDA)"
     if cmd in ("/today", "/start"):
         return build_report(engine, "evening")[0]
     if cmd in ("/top", "/watchlist"):

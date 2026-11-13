@@ -155,6 +155,10 @@ def build_report(engine: Engine, kind: str = "evening", now: datetime | None = N
     else:
         sig = f"READY : {', '.join(ready)}. Plans de paper trading pas encore créés (création après l'ingestion du soir)."
     L += ["", "<b>7. Signaux (simulation)</b>", sig]
+    from stockhunter.discovery.telegram import summary_lines
+    disc = summary_lines(engine)
+    if disc:
+        L += ["", "<b>7 bis. Découverte — univers large</b>"] + disc
     # 8-9. Portefeuille papier
     L += ["", "<b>8. Portefeuille simulé</b>",
           f"Valeur {amount(pf['equity'])} $ (capital {amount(pf['capital'])} $) · réalisé {money(pf['realized'])} $ · "

@@ -147,3 +147,21 @@ def test_deep_dive_only_for_top_candidates_and_point_in_time(engine, panel):
     assert deep["depots"][0]["vigilance"] and "Dépréciation" in deep["depots"][0]["label"]
     assert deep["actualites"][0]["category"] == "legal" and deep["fondamentaux"] == {"disponible": False}
     assert "depots" not in shallow and shallow["series"]["close"]
+
+
+def test_telegram_scanner_and_signal_trace_origin_and_result(engine, panel):
+    from stockhunter.notifications.engine import answer
+    from stockhunter.reports.daily import build_report
+    assert "Aucun classement" in answer(engine, "/scanner")
+    past = panel.truncate(panel.close.index[-70])
+    res = disc.run(past, {t: f"{t} <b>Corp</b>" for t in panel.close.columns})
+    dstore.save(engine, res)
+    dstore.update_outcomes(engine, panel)
+    top = res["categories"]["momentum"]["candidats"][0]["ticker"]
+    msg = answer(engine, "/scanner")
+    assert top in msg and "exploratoires" in msg
+    sig = answer(engine, f"/signal {top.lower()}")
+    assert "Pourquoi" in sig and "Plan simulé" in sig and "Historique et résultats" in sig
+    assert (" R" in sig or "annulé" in sig) and "<b>Corp</b>" not in sig          # résultat tracé ; HTML échappé
+    assert "jamais été relevée" in answer(engine, "/signal NOPE") and "Usage" in answer(engine, "/signal")
+    assert "/scanner" in answer(engine, "/help")
