@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     telegram_max_per_run: int = 15          # anti-spam : au-delà, les messages attendent le run suivant
     report_morning_hour_paris: int = 8      # rapport du matin, heure de Paris (changements d'heure gérés)
 
+    db_volume_mb: float = 500.0            # volume PostgreSQL (Railway gratuit : 500 Mo) pour les seuils 80/90/95 %
+    db_fs_overhead_mb: float = 0.0         # réserve du système de fichiers hors répertoire de données (calibrée sur Railway)
     dashboard_password_hash: SecretStr | None = None   # hachage scrypt (stockhunter dashboard hash-password)
     dashboard_secret: SecretStr | None = None          # clé de signature des sessions (32+ caractères aléatoires)
 

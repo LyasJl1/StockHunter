@@ -85,4 +85,4 @@ jobs:
         run: |
           stockhunter db tune | tee -a "$GITHUB_STEP_SUMMARY"
           stockhunter db diag > diag.json
-          python -c "import json;d=json.load(open('diag.json'));print('WAL :',d['wal'],'| réglages :',{k:d['reglages'][k] for k in ('max_wal_size','min_wal_size')})" | tee -a "$GITHUB_STEP_SUMMARY"
+          python -c "import json;d=json.load(open('diag.json'));print('WAL :',d['wal'],'| répertoire :',d['repertoire_donnees_mo'],'Mo | stockage :',d['stockage'],'| réglages :',{k:d['reglages'][k] for k in ('max_wal_size','min_wal_size')})" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -76,8 +76,9 @@ def test_tune_is_safe_on_any_database(engine):
     from stockhunter.db.copy import tune
     out = tune(engine, progress=lambda m: None)
     if engine.dialect.name == "postgresql":
-        assert out["apres"]["bases_mo"] > 0 and out["apres"]["niveau"] in ("ok", "attention", "alerte", "critique")
-        assert out["vacuum"] == "fait"
+        assert out["apres"]["repertoire_mo"] > out["apres"]["bases_mo"] > 0
+        assert out["apres"]["methode"] == "répertoire de données mesuré"
+        assert out["wal"]["segments_apres"] <= max(out["wal"]["segments_avant"], 4)
         with engine.connect() as c:
             from sqlalchemy import text
             assert c.execute(text("SHOW max_wal_size")).scalar() == "64MB"
@@ -95,7 +96,35 @@ def test_storage_levels(engine, monkeypatch):
     assert dbc.storage(engine, volume_mb=used / 0.85)["niveau"] == "attention"
     assert dbc.storage(engine, volume_mb=used / 0.92)["niveau"] == "alerte"
     assert dbc.storage(engine, volume_mb=used / 0.97)["niveau"] == "critique"
-    # espace insuffisant : pas de VACUUM (il a besoin de place), le point de contrôle reste fait
-    monkeypatch.setattr(dbc, "VOLUME_MB_DEFAULT", used / 0.99)
-    out = dbc.tune(engine, progress=lambda m: None)
+    # VACUUM demandé mais marge insuffisante : non lancé (il a lui-même besoin de place)
+    monkeypatch.setenv("SH_DB_VOLUME_MB", str(used / 0.99))
+    out = dbc.tune(engine, progress=lambda m: None, vacuum=True)
     assert out["vacuum"].startswith("non fait")
+
+
+def test_reclaim_wal_never_deletes_files_itself_and_shrinks_preallocated_segments(engine):
+    """Reproduit l'incident : beaucoup de segments WAL préalloués ; après plafonnement, `reclaim_wal` les rend
+    au disque par pg_switch_wal + CHECKPOINT (aucune suppression manuelle)."""
+    from sqlalchemy import text
+    from stockhunter.db import copy as dbc
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        c.execute(text("ALTER SYSTEM SET max_wal_size = '1GB'"))
+        c.execute(text("ALTER SYSTEM SET min_wal_size = '320MB'"))
+        c.execute(text("SELECT pg_reload_conf()"))
+        c.execute(text("CREATE TABLE IF NOT EXISTS zz_wal_load (x text)"))
+        for _ in range(14):                                      # ≈ 200 Mo de WAL
+            c.execute(text("INSERT INTO zz_wal_load SELECT repeat('x', 1000) FROM generate_series(1, 15000)"))
+        c.execute(text("CHECKPOINT"))                            # segments gardés, recyclés d'avance (min_wal_size)
+        c.execute(text("DROP TABLE zz_wal_load"))
+        before = int(c.execute(text("SELECT count(*) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{24}$'")).scalar())
+    try:
+        out = dbc.tune(engine, progress=lambda m: None)
+        assert before >= 10 and out["wal"]["segments_avant"] >= 10
+        assert out["wal"]["segments_apres"] <= 6 and out["wal"]["libere_mo"] >= 64
+    finally:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+            c.execute(text("ALTER SYSTEM RESET max_wal_size"))
+            c.execute(text("ALTER SYSTEM RESET min_wal_size"))
+            c.execute(text("SELECT pg_reload_conf()"))

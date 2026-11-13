@@ -84,3 +84,14 @@ def test_partial_run_is_retried_by_the_next_slot(engine):
     pipeline.run(engine, STEPS, lambda argv: calls.append(argv[0]) or (2 if argv[0] == "a" else 0), now=now)
     pipeline.run(engine, STEPS, lambda argv: calls.append(argv[0]) or 0, now=now)
     assert calls.count("a") == 2                                          # quota atteint au 1er passage : repris
+
+
+def test_critical_storage_halts_writes_but_still_alerts(engine):
+    steps = (Step("stockage", "0", ("chk",), True, warn_codes=(2,), halt_codes=(3,)), Step("a", "1", ("a",), True),
+             Step("notifications", "7", ("n",), True))
+    calls = []
+    code = pipeline.run(engine, steps, lambda argv: calls.append(argv[0]) or (3 if argv[0] == "chk" else 0))
+    assert calls == ["chk", "n"] and code == 1                     # aucune écriture lourde, alerte envoyée, job rouge
+    with session_scope(engine) as s:
+        last = json.loads(s.get(KeyValue, pipeline.KV).value)
+    assert last["steps"][1]["status"] == "warning" and "arrêtée" in last["steps"][1]["error"]

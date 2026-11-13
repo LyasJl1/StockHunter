@@ -77,36 +77,80 @@ VOLUME_MB_DEFAULT = 500          # volume du plan gratuit Railway
 THRESHOLDS = (0.80, 0.90, 0.95)
 
 
+DATA_DIR_SQL = """
+WITH RECURSIVE f(path, isdir) AS (
+    SELECT name, (pg_stat_file(name, true)).isdir FROM pg_ls_dir('.', true, false) AS name
+  UNION ALL
+    SELECT f.path || '/' || c, (pg_stat_file(f.path || '/' || c, true)).isdir
+    FROM f, LATERAL pg_ls_dir(f.path, true, false) AS c WHERE f.isdir
+)
+SELECT COALESCE(sum((pg_stat_file(path, true)).size) FILTER (WHERE NOT isdir), 0) FROM f
+"""
+
+
 def storage(engine: Engine, volume_mb: float | None = None) -> dict:
-    """Occupation estimée du volume PostgreSQL : toutes les bases + WAL (le reste du répertoire est négligeable).
-    Niveau : ok | attention (≥ 80 %) | alerte (≥ 90 %) | critique (≥ 95 %). Lecture seule."""
+    """Occupation du volume PostgreSQL. Mesure réelle du répertoire de données (tous les fichiers, WAL compris)
+    quand le rôle le permet ; sinon estimation bases + WAL. S'y ajoute la réserve du système de fichiers
+    (SH_DB_FS_OVERHEAD_MB, mesurée sur Railway). Niveau : ok | attention (≥ 80 %) | alerte (≥ 90 %) |
+    critique (≥ 95 %). Lecture seule."""
     if engine.dialect.name != "postgresql":
         return {"dialect": engine.dialect.name, "niveau": "ok"}
+    from stockhunter.config import Settings
+    st = Settings()
+    volume_mb = volume_mb or st.db_volume_mb or VOLUME_MB_DEFAULT
     with engine.connect() as c:
-        dbs = c.execute(text("SELECT COALESCE(sum(pg_database_size(datname)), 0) FROM pg_database")).scalar()
+        dbs = float(c.execute(text("SELECT COALESCE(sum(pg_database_size(datname)), 0) FROM pg_database")).scalar())
         try:
-            wal = c.execute(text("SELECT COALESCE(sum(size), 0) FROM pg_ls_waldir()")).scalar()
+            wal = float(c.execute(text("SELECT COALESCE(sum(size), 0) FROM pg_ls_waldir()")).scalar())
         except Exception:
             wal = None
+        try:
+            ddir = float(c.execute(text(DATA_DIR_SQL)).scalar())
+            method = "répertoire de données mesuré"
+        except Exception:
+            ddir, method = dbs + (wal or 0), "estimation bases + WAL"
         max_wal = c.execute(text("SHOW max_wal_size")).scalar()
-    volume_mb = volume_mb or VOLUME_MB_DEFAULT
-    dbs = float(dbs)                                  # PostgreSQL renvoie un Decimal pour sum()
-    wal = None if wal is None else float(wal)
-    used = (dbs + (wal or 0)) / 1048576
+    used = ddir / 1048576 + st.db_fs_overhead_mb
     share = used / volume_mb
     level = ("critique" if share >= THRESHOLDS[2] else "alerte" if share >= THRESHOLDS[1]
              else "attention" if share >= THRESHOLDS[0] else "ok")
     return {"dialect": "postgresql", "bases_mo": round(dbs / 1048576, 1),
-            "wal_mo": None if wal is None else round(wal / 1048576, 1), "utilise_mo": round(used, 1),
-            "volume_mo": volume_mb, "part": round(share, 4), "niveau": level, "max_wal_size": max_wal}
+            "wal_mo": None if wal is None else round(wal / 1048576, 1), "repertoire_mo": round(ddir / 1048576, 1),
+            "reserve_fs_mo": st.db_fs_overhead_mb, "utilise_mo": round(used, 1), "volume_mo": volume_mb,
+            "part": round(share, 4), "niveau": level, "methode": method, "max_wal_size": max_wal}
 
 
-def tune(engine: Engine, progress=print, vacuum: bool = True) -> dict:
+def reclaim_wal(engine: Engine, progress=print, target_files: int = 4, max_rounds: int = 24) -> dict:
+    """Rend au disque les segments WAL préalloués devenus inutiles, SANS supprimer de fichier à la main.
+
+    PostgreSQL ne supprime un segment que lorsqu'il est derrière le point de reprise d'un point de contrôle ; les
+    segments « recyclés » d'avance (240 Mo le 13/11/2026) ne le deviennent qu'une fois traversés. `pg_switch_wal()`
+    fait passer au segment suivant sans écrire 16 Mo ; le CHECKPOINT qui suit laisse alors PostgreSQL supprimer ce
+    qui dépasse le plafond `max_wal_size`. Opérations standard, sans perte de données."""
+    rounds = []
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        count = lambda: int(c.execute(text("SELECT count(*) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{24}$'")).scalar())
+        start = count()
+        for _ in range(max_rounds):
+            n = count()
+            rounds.append(n)
+            if n <= target_files:
+                break
+            c.execute(text("SELECT pg_switch_wal()"))
+            c.execute(text("CHECKPOINT"))
+        end = count()
+    out = {"segments_avant": start, "segments_apres": end, "tours": len(rounds) - 1,
+           "libere_mo": (start - end) * 16}
+    progress(f"Récupération WAL : {out}")
+    return out
+
+
+def tune(engine: Engine, progress=print, vacuum: bool = False) -> dict:
     """Entretien PostgreSQL pour un petit volume (0,5 Go) : plafonne les journaux WAL (1 Go par défaut, ce qui a
-    saturé le disque le 13/11/2026), force deux points de contrôle pour que PostgreSQL recycle lui-même les
-    segments devenus inutiles (aucun fichier n'est supprimé à la main), puis nettoie les tables (VACUUM simple,
-    jamais FULL) seulement si l'espace libre le permet. Réversible (`ALTER SYSTEM RESET ...`). Aucune donnée
-    modifiée. Sans effet sur SQLite."""
+    saturé le disque le 13/11/2026), puis rend les segments inutiles au disque (`reclaim_wal`). Aucun fichier n'est
+    supprimé à la main, aucune donnée n'est modifiée ; réversible (`ALTER SYSTEM RESET ...`). Le nettoyage des
+    tables est laissé à l'autovacuum (le VACUUM manuel du 13/11 a échoué faute de place : il n'est lancé que sur
+    demande et avec de la marge). Sans effet sur SQLite."""
     if engine.dialect.name != "postgresql":
         progress("Base SQLite : aucun réglage nécessaire.")
         return {}
@@ -114,21 +158,20 @@ def tune(engine: Engine, progress=print, vacuum: bool = True) -> dict:
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
         changed = []
         for k, v in WAL_SETTINGS.items():
-            if c.execute(text(f"SHOW {k}")).scalar() != v:
+            if c.execute(text(f"SHOW {k}")).scalar().replace(" ", "") != v:
                 c.execute(text(f"ALTER SYSTEM SET {k} = '{v}'"))
                 changed.append(k)
         if changed:
             c.execute(text("SELECT pg_reload_conf()"))
         out["reglages_modifies"] = changed
-        c.execute(text("CHECKPOINT"))
-        c.execute(text("CHECKPOINT"))                       # le second recycle les segments libérés par le premier
-    out["apres_checkpoint"] = storage(engine)
-    if vacuum and out["apres_checkpoint"]["part"] < THRESHOLDS[2]:
+    out["wal"] = reclaim_wal(engine, progress)
+    out["apres_wal"] = storage(engine)
+    if vacuum and out["apres_wal"]["part"] < THRESHOLDS[0]:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
-            c.execute(text("VACUUM (ANALYZE)"))
+            c.execute(text("VACUUM (ANALYZE, PARALLEL 0)"))
         out["vacuum"] = "fait"
     else:
-        out["vacuum"] = "non fait (désactivé ou espace libre insuffisant)"
+        out["vacuum"] = "laissé à l'autovacuum" if not vacuum else "non fait (marge insuffisante, < 20 % libre)"
     out["apres"] = storage(engine)
     progress(f"Entretien PostgreSQL : {out}")
     return out
@@ -178,7 +221,7 @@ def diagnose(engine: Engine) -> dict:
     out["config_auto"] = [r[0] for r in q("SELECT name || ' = ' || setting FROM pg_file_settings WHERE sourcefile LIKE '%auto.conf'", [])]
     out["fichiers_temporaires_cumules"] = {n: {"fichiers": f, "mo": mb(b)} for n, f, b in q(
         "SELECT datname, temp_files, temp_bytes FROM pg_stat_database WHERE datname IS NOT NULL", [])}
-    top = q("""SELECT d, sum(s) FROM (SELECT split_part(f, '/', 1) d, (pg_stat_file(f)).size s
-               FROM (SELECT 'base/' || x f FROM pg_ls_dir('base') x) z) y GROUP BY d""", [])
-    out["repertoire_base_mo"] = mb(sum(int(s or 0) for _d, s in top)) if top and top[0][0] != "ERREUR" else None
+    r = q(DATA_DIR_SQL)
+    out["repertoire_donnees_mo"] = mb(float(r[0][0])) if r and r[0][0] != "ERREUR" else r[0][1]
+    out["stockage"] = storage(engine)
     return out

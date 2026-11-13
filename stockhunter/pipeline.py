@@ -36,10 +36,13 @@ class Step:
     argv: tuple[str, ...]
     critical: bool
     warn_codes: tuple[int, ...] = (2,)
+    halt_codes: tuple[int, ...] = ()        # ce code arrête la chaîne (sauf l'étape notifications)
 
 
 NIGHTLY: tuple[Step, ...] = (
     Step("entretien", "0 base", ("db", "tune"), False),
+    # volume ≥ 95 % après entretien : on n'écrit plus rien (seule l'alerte part) plutôt que de saturer le disque
+    Step("stockage", "0 base", ("db", "check"), True, warn_codes=(2,), halt_codes=(3,)),
     Step("univers", "1 collecte", ("sync-universe",), False),
     Step("ingestion", "1 collecte", ("ingest", "all"), True),
     Step("marche_large", "1 collecte", ("market", "sync", "--max-calls", "4"), False),
@@ -115,7 +118,12 @@ def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[lis
                 kv.value = payload
         return status
 
+    halted = None
     for st in steps:
+        if halted and st.name != "notifications":
+            results.append({"name": st.name, "stage": st.stage, "critical": st.critical, "status": "warning",
+                            "error": f"non exécutée : {halted}", "seconds": 0.0})
+            continue
         if st.name == "notifications":
             record(final=False)                     # les pannes déjà connues partent dans l'alerte de ce soir
         t0 = time.monotonic()
@@ -125,6 +133,8 @@ def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[lis
             code = runner(list(st.argv))
             res["code"] = code
             res["status"] = "ok" if code == 0 else ("warning" if code in st.warn_codes else "failed")
+            if code in st.halt_codes:
+                halted = f"chaîne arrêtée par l'étape {st.name} (code {code})"
             if res["status"] == "failed":
                 res["error"] = f"code de sortie {code}"
         except SystemExit as exc:                    # argparse ou sys.exit dans une commande

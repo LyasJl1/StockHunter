@@ -367,6 +367,20 @@ def cmd_db(settings, engine, args) -> int:
     if args.action == "tune":
         tune(engine)
         return 0
+    if args.action == "check":
+        from stockhunter.db.copy import storage
+        from stockhunter.notifications.engine import enqueue
+        st = storage(engine, settings.db_volume_mb)
+        print(f"Stockage : {st}")
+        if st["niveau"] == "ok":
+            return 0
+        msg = (f"<b>STOCKHUNTER AI — Stockage de la base : {st['niveau'].upper()}</b>\n"
+               f"{st['utilise_mo']:.0f} Mo utilisés sur {st['volume_mo']:.0f} Mo ({st['part'] * 100:.0f} %), dont WAL "
+               f"{st['wal_mo']} Mo. " + ("Chaîne nocturne arrêtée pour éviter la saturation : intervention requise "
+               "(workflow « Sauvegarde de la base » avec entretien)." if st["niveau"] == "critique" else
+               "Aucune action immédiate ; surveiller la page Santé."))
+        enqueue(engine, "alert", f"storage:{date.today()}:{st['niveau']}", msg)
+        return 3 if st["niveau"] == "critique" else 2
     if args.action == "diag":
         from stockhunter.db.copy import diagnose
         print(json.dumps(diagnose(engine), ensure_ascii=False, indent=1, default=str))
@@ -546,7 +560,7 @@ def add_parsers(sub) -> dict:
     db.add_argument("--insecure-cookies", action="store_true", help="HTTP local uniquement (pas de HTTPS)")
     db.add_argument("--telegram-worker", action="store_true", help="répondre aux commandes Telegram en continu")
     cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
-    cp.add_argument("action", choices=["copy-to", "tune", "diag"])
+    cp.add_argument("action", choices=["copy-to", "tune", "diag", "check"])
     cp.add_argument("target", nargs="?", help="copy-to : URL de la base cible, déjà migrée et vide")
     return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "pipeline": cmd_pipeline, "discover": cmd_discover, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
