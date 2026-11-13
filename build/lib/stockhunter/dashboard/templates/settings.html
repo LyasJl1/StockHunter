@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+{% if saved %}<p class="ok">Réglages enregistrés : ils s'appliquent aux prochains plans de paper trading.</p>{% endif %}
+{% if error %}<p class="error">Réglage refusé : {{ error }}</p>{% endif %}
+<div class="grid g2">
+<div class="card"><h2>Paper trading (modifiable)</h2>
+<form method="post" action="/settings">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<table>
+<tr><td>Capital simulé ($)</td><td><input name="capital" value="{{ cfg.capital|int }}"></td></tr>
+<tr><td>Risque par position (fraction du capital, 0,001 à 0,02)</td><td><input name="risk_fraction" value="{{ cfg.risk_fraction }}"></td></tr>
+<tr><td>Positions simultanées max.</td><td><input name="max_positions" value="{{ cfg.max_positions }}"></td></tr>
+<tr><td>Positions max. par secteur</td><td><input name="max_per_sector" value="{{ cfg.max_per_sector }}"></td></tr>
+</table>
+<p class="sub">Levier interdit. Stop 2×ATR, TP1 +{{ cfg.tp1_r }} R, TP2 +{{ cfg.tp2_r }} R, stop suiveur {{ cfg.trail_atr }}×ATR, {{ cfg.max_sessions }} séances max (méthode figée, documentée).</p>
+<button class="primary">Enregistrer</button></form></div>
+<div class="card"><h2>Scoring (versionné, lecture seule)</h2>
+<p>{{ scoring.name }} <b>{{ scoring.version }}</b> — stade {{ scoring.stage }}</p>
+<table>{% for k, v in scoring.weights.__dict__.items() %}<tr><td>Poids {{ k }}</td><td class="r">{{ (v*100)|round|int }} %</td></tr>{% endfor %}
+<tr><td>Seuil READY / DEVELOPING / rejet</td><td class="r">{{ scoring.thresholds.ready_at|int }} / {{ scoring.thresholds.developing_at|int }} / {{ scoring.thresholds.reject_below|int }}</td></tr>
+<tr><td>Liquidité minimale</td><td class="r">{{ (scoring.thresholds.min_dollar_volume/1e6)|int }} M$ / jour</td></tr></table>
+<p class="sub">Changer un poids ou un seuil crée une nouvelle version, qui doit repasser la validation historique (phase 3) : ces paramètres se modifient dans le code, pas ici.</p></div>
+<div class="card"><h2>Sources de données</h2><table><tr><th>Source</th><th>Dernier appel réussi</th><th>Sur ce serveur</th></tr>{% for r in sources %}<tr><td>{{ r.name }}</td><td class="{{ '' if r.last_ok else 'neg' }}">{{ r.last_ok or 'aucun enregistré' }}</td><td class="sub">{{ r.local }}</td></tr>{% endfor %}</table>
+<p class="sub">La collecte des données tourne sur GitHub Actions (clés API dans l'environnement GitHub « Variables ») ; ce serveur web ne les appelle pas, ses clés absentes sont donc normales. « Dernier appel réussi » vient du journal en base (30 derniers jours). Telegram est utilisé directement par ce serveur.</p></div>
+<div class="card"><h2>Univers et calendrier</h2>
+<p>Univers suivi : <b>{{ universe|length }}</b> instruments ({{ universe|selectattr('asset_type','equalto','stock')|list|length }} actions) — fichier <code>stockhunter/universe/us_seed.csv</code>. Univers large (recherche) : toutes les actions US via Massive.</p>
+<p>Rapport du matin : {{ morning }} h (heure de Paris, en semaine) · rapport du soir : après l'ingestion (~0 h 15 à Paris) · analyses : chaque soir de bourse.</p>
+<p class="sub">Horaires et fréquence : variables SH_REPORT_MORNING_HOUR_PARIS et workflows GitHub (.github/workflows).</p></div>
+</div>
+{% endblock %}

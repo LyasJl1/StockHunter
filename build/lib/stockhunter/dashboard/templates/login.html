@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connexion — StockHunter AI</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f7f9;font:14px system-ui,sans-serif;color:#14171c}
+@media (prefers-color-scheme:dark){body{background:#0f1216;color:#e8ebef}.box{background:#171b21!important;border-color:#262c34!important}input{background:#0f1216;color:#e8ebef;border-color:#262c34!important}}
+.box{background:#fff;border:1px solid #e3e6ea;border-radius:12px;padding:28px;width:320px}h1{font-size:18px;margin:0 0 4px}p{color:#5d6673;margin:0 0 18px}
+input{width:100%;padding:9px;border:1px solid #e3e6ea;border-radius:6px;font:inherit;margin-bottom:12px}button{width:100%;padding:9px;border:0;border-radius:6px;background:#1f5eff;color:#fff;font:inherit;cursor:pointer}
+.error{color:#c2362b;margin-bottom:10px}</style></head>
+<body><form class="box" method="post" action="/login">
+<h1>StockHunter AI</h1><p>Accès privé</p>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<input type="password" name="password" placeholder="Mot de passe" autocomplete="current-password" autofocus required>
+<button type="submit">Se connecter</button></form></body></html>

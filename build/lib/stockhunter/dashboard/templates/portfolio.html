@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="tabs"><a href="/portfolio?tab=paper" class="{{ 'on' if tab=='paper' }}">Portefeuille simulé (paper trading)</a>
+<a href="/performance">Performance simulée (courbe, drawdown, SPY)</a>
+<a href="/portfolio?tab=real" class="{{ 'on' if tab=='real' }}">Mes investissements (réel)</a></p>
+{% if tab == 'paper' %}
+<div class="banner">Simulation de stratégies NON validées. Aucun ordre réel. Distinct de ton portefeuille réel.</div>
+<div class="grid g4">
+  <div class="card"><h2>Valeur simulée</h2><div class="kpi">{{ pf.equity|num(0) }} $</div><div class="sub">capital de départ {{ pf.capital|num(0) }} $</div></div>
+  <div class="card"><h2>Réalisé (net de frais)</h2><div class="kpi {{ 'pos' if pf.realized>0 else ('neg' if pf.realized<0) }}">{{ pf.realized|num(0) }} $</div></div>
+  <div class="card"><h2>Latent</h2><div class="kpi">{{ pf.unrealized|num(0) }} $</div></div>
+  <div class="card"><h2>Trades</h2><div class="kpi">{{ pf.trades_total }}</div><div class="sub">{{ pf.planned }} plans · {{ pf.open }} ouverts · {{ pf.closed }} clos · {{ pf.cancelled }} annulés</div></div>
+</div>
+<div class="card" style="margin-top:16px"><h2>Positions ouvertes</h2><table>
+<tr><th>Action</th><th class="r">Quantité</th><th class="r">Entrée</th><th class="r">Dernière clôture</th><th class="r">Latent</th><th class="r">Stop</th><th class="r">TP1</th><th class="r">TP2</th></tr>
+{% for p in pf.positions %}<tr><td><a href="/stock/{{ p.symbol }}"><b>{{ p.symbol }}</b></a><div class="sub">depuis le {{ p.entry_date }}</div></td>
+<td class="r">{{ p.shares|num(0) }}</td><td class="r">{{ p.entry|num }}</td><td class="r">{{ p.last|num }}<div class="sub">{{ p.last_date }}</div></td>
+<td class="r {{ 'pos' if p.unrealized>0 else 'neg' }}">{{ p.unrealized|num(0) }} $</td><td class="r">{{ p.stop|num }}</td>
+<td class="r">{{ p.tp1|num }}{{ ' ✓' if p.tp1_done }}</td><td class="r">{{ p.tp2|num }}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">Aucune position ouverte.</td></tr>{% endfor %}</table>
+<p class="sub">Règles : risque {{ (cfg.risk_fraction*100)|num(1) }} % du capital par position, {{ cfg.max_positions }} positions max, {{ cfg.max_per_sector }} par secteur, refus si corrélation 60 j > {{ cfg.max_correlation|num(2) }} avec une position ouverte, pas de levier, frais {{ cfg.cost_bps|num(0) }} pb + glissement {{ cfg.slippage_bps|num(0) }} pb. Modifiables dans Réglages. Mêmes règles que le backtest.</p></div>
+<div class="card" style="margin-top:16px"><h2>Journal de décision (immuable)</h2><table>
+<tr><th>Date</th><th>Action</th><th>Événement</th><th class="r">Prix</th><th class="r">Quantité</th><th>Pourquoi</th></tr>
+{% for j in journal %}<tr><td>{{ j.date|d }}</td><td><a href="/stock/{{ j.symbol }}"><b>{{ j.symbol }}</b></a></td>
+<td>{{ {'PLANNED': 'Plan créé', 'OPENED': 'Entrée', 'CANCELLED': 'Refusé / annulé', 'TP1': 'Objectif 1', 'CLOSED': 'Sortie', 'STOP_MOVED': 'Stop déplacé', 'SPLIT': 'Split'}.get(j.kind, j.kind) }}</td>
+<td class="r">{{ j.price|num if j.price is not none and j.kind != 'SPLIT' else '—' }}</td><td class="r">{{ j.shares|num(0) if j.shares is not none else '—' }}</td><td class="sub">{{ j.detail }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">Aucune décision enregistrée : aucun signal n'a encore donné lieu à un plan.</td></tr>{% endfor %}</table>
+<p class="sub">Chaque sélection, entrée, refus, modification et sortie est consignée avec son motif et n'est jamais réécrite.</p></div>
+{% else %}
+<div class="banner">Ton portefeuille réel, saisi à la main. Valorisé à la dernière clôture connue (datée). Jamais mélangé avec la simulation.</div>
+{% if error %}<p class="error">Opération refusée : {{ error }}</p>{% endif %}
+{% set u = real.totals.USD %}{% set e = real.totals.EUR %}
+<div class="grid g4">
+  <div class="card"><h2>Capital investi</h2><div class="kpi">{{ u.invested|num(0) }} $</div><div class="sub">{{ e.invested|num(0) }} €</div></div>
+  <div class="card"><h2>Valeur estimée</h2><div class="kpi">{{ u.value|num(0) }} $</div><div class="sub">{{ e.value|num(0) }} €{% if real.fx %} · 1 € = {{ real.fx[0]|num(4) }} $ (FRED, {{ real.fx[1]|d }}){% endif %}</div></div>
+  <div class="card"><h2>Latent / réalisé</h2><div class="kpi">{{ u.unrealized|num(0) }} $</div><div class="sub">réalisé {{ u.realized|num(0) }} $</div></div>
+  <div class="card"><h2>Dividendes</h2><div class="kpi">{{ u.dividends|num(0) }} $</div></div>
+</div>
+<div class="card" style="margin-top:16px"><h2>Positions</h2><table>
+<tr><th>Action</th><th class="r">Quantité</th><th class="r">Prix moyen</th><th class="r">Dernière clôture</th><th class="r">Valeur</th><th class="r">Latent</th><th class="r">Rendement sans / avec div.</th><th>Secteur</th></tr>
+{% for p in real.positions %}<tr><td><b>{{ p.symbol }}</b> <span class="sub">{{ p.currency }}</span>{% for w in p.warnings %}<div class="error sub">{{ w }}</div>{% endfor %}</td>
+<td class="r">{{ p.quantity|num(4) }}</td><td class="r">{{ p.avg_cost|num }}</td>
+<td class="r">{{ p.price|num }}<div class="sub">{{ p.price_date|d }} · {{ p.price_source or 'cours indisponible' }}</div></td>
+<td class="r">{{ p.value|num(0) }}</td><td class="r {{ 'pos' if (p.unrealized or 0)>0 else 'neg' }}">{{ p.unrealized|num(0) }} ({{ p.unrealized_pct|pct }})</td>
+<td class="r">{{ p.return_without_div|pct }} / {{ p.return_with_div|pct }}</td><td class="sub">{{ p.sector or 'Non classé' }}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">Aucune opération saisie.</td></tr>{% endfor %}</table>
+{% if real.sectors %}<p class="sub">Répartition sectorielle : {% for k, v in real.sectors|dictsort(by='value', reverse=true) %}{{ k }} {{ (v / (u.value or 1))|pct(0, false) }}{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}</div>
+<div class="card" style="margin-top:16px"><h2>Saisir une opération</h2>
+<form method="post" action="/portfolio/transactions" class="filters">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input name="symbol" placeholder="Ticker" required size="8">
+  <input type="date" name="trade_date" value="{{ today }}" max="{{ today }}" required>
+  <select name="kind"><option value="BUY">Achat</option><option value="SELL">Vente</option><option value="DIVIDEND">Dividende</option></select>
+  <input name="quantity" placeholder="Quantité" size="8">
+  <input name="price" placeholder="Prix unitaire (ou montant du dividende)" required size="26">
+  <input name="fees" placeholder="Frais" size="6">
+  <select name="currency"><option>USD</option><option>EUR</option></select>
+  <input name="note" placeholder="Note" size="14">
+  <button class="primary">Enregistrer</button>
+</form></div>
+<div class="card" style="margin-top:16px"><h2>Historique des opérations</h2><table>
+<tr><th>Date</th><th>Action</th><th>Type</th><th class="r">Quantité</th><th class="r">Prix / montant</th><th class="r">Frais</th><th>Note</th><th></th></tr>
+{% for t in real.transactions|reverse %}<tr><td>{{ t.trade_date|d }}</td><td>{{ t.symbol }}</td><td>{{ {'BUY':'Achat','SELL':'Vente','DIVIDEND':'Dividende'}[t.kind] }}</td>
+<td class="r">{{ t.quantity|num(4) }}</td><td class="r">{{ t.price|num }} {{ t.currency }}</td><td class="r">{{ t.fees|num }}</td><td class="sub">{{ t.note or '' }}</td>
+<td><form method="post" action="/portfolio/transactions/{{ t.id }}/delete" data-confirm="Supprimer cette opération ?"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Supprimer</button></form></td></tr>
+{% else %}<tr><td colspan="8" class="muted">—</td></tr>{% endfor %}</table></div>
+{% endif %}
+{% endblock %}

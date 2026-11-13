@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StockHunter AI</title>
+<script src="/static/htmx-2.0.4.min.js"></script>
+<script src="/static/chart-4.4.1.umd.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#14171c;--muted:#5d6673;--line:#e3e6ea;--accent:#1f5eff;
+--pos:#0f8a4f;--neg:#c2362b;--warn:#a86400;--ready:#0f8a4f;--dev:#1f5eff;--watch:#5d6673;--rej:#9aa3ad}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--ink:#e8ebef;--muted:#9aa3ad;--line:#262c34;
+--accent:#6e95ff;--pos:#3cc88a;--neg:#ff7a6e;--warn:#e5a543;--ready:#3cc88a;--dev:#6e95ff;--watch:#9aa3ad;--rej:#5d6673}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+header{display:flex;gap:24px;align-items:center;padding:12px 24px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+header .brand{font-weight:700;letter-spacing:.2px}header nav{display:flex;gap:4px;flex-wrap:wrap}
+header nav a{padding:6px 10px;border-radius:6px;color:var(--muted)}header nav a.on{background:var(--bg);color:var(--ink);font-weight:600}
+header form{margin-left:auto}button,.btn{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:6px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+main{max-width:1240px;margin:0 auto;padding:20px 24px 48px}
+.banner{border-left:3px solid var(--warn);background:var(--card);padding:10px 14px;margin-bottom:16px;color:var(--muted)}
+.grid{display:grid;gap:16px}.g4{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}.g2{grid-template-columns:repeat(auto-fit,minmax(420px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 10px;font-weight:600}
+.kpi{font-size:26px;font-weight:650;font-variant-numeric:tabular-nums}.sub{color:var(--muted);font-size:12.5px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:600}td.r,th.r{text-align:right;white-space:nowrap}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid currentColor}
+.READY{color:var(--ready)}.DEVELOPING{color:var(--dev)}.WATCHLIST{color:var(--watch)}.REJECTED{color:var(--rej)}
+.pos{color:var(--pos)}.neg{color:var(--neg)}.muted{color:var(--muted)}
+.bar{height:6px;background:var(--line);border-radius:3px;min-width:40px}.bar>i{display:block;height:6px;border-radius:3px;background:var(--accent)}
+form.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}input,select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+ul.reasons{margin:6px 0;padding-left:18px}.tabs a{margin-right:12px;padding-bottom:6px}.tabs a.on{border-bottom:2px solid var(--accent);color:var(--ink);font-weight:600}
+.error{color:var(--neg)}.ok{color:var(--pos)}footer{color:var(--muted);font-size:12px;margin-top:24px}
+@media (max-width:700px){main{padding:12px}.g2{grid-template-columns:1fr}.hide-sm{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">StockHunter AI</span>
+  <nav>
+    <a href="/" class="{{ 'on' if page=='overview' }}">Marché</a>
+    <a href="/scanner" class="{{ 'on' if page in ('scanner','discover','opportunities','stock') }}">Scanner</a>
+    <a href="/lab" class="{{ 'on' if page=='lab' }}">Laboratoire</a>
+    <a href="/portfolio" class="{{ 'on' if page in ('portfolio','performance') }}">Portefeuilles</a>
+    <a href="/system" class="{{ 'on' if page=='system' }}">Santé</a>
+    <a href="/settings" class="{{ 'on' if page=='settings' }}">Réglages</a>
+  </nav>
+  <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Déconnexion</button></form>
+</header>
+<main>
+{% block content %}{% endblock %}
+<footer>Analyse automatisée, pas un conseil en investissement. Cours de clôture datés, jamais en temps réel. Un score n'est pas une probabilité. Le portefeuille simulé et le portefeuille réel ne sont jamais mélangés.</footer>
+</main>
+<script nonce="{{ request.state.nonce }}">
+document.addEventListener('submit', ev => {
+  const msg = ev.target.dataset && ev.target.dataset.confirm;
+  if (msg && !confirm(msg)) ev.preventDefault();
+});
+</script>
+</body>
+</html>

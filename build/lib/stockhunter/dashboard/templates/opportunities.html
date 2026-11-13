@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="tabs" style="margin-bottom:14px"><a href="/scanner">Univers large</a><a class="on" href="/opportunities">Univers suivi (42 actions, score détaillé)</a></div>
+{% if meta %}<div class="banner">{{ meta.validation }}</div>{% endif %}
+<form class="filters" hx-get="/opportunities" hx-target="#tbl" hx-trigger="change, keyup changed delay:300ms from:input[name=q]">
+  <input name="q" placeholder="Ticker ou société" value="{{ f.q }}">
+  <select name="status">
+    {% for v, l in [('', 'Tous statuts'), ('READY,DEVELOPING', 'READY + DEVELOPING'), ('READY', 'READY'), ('DEVELOPING', 'DEVELOPING'), ('WATCHLIST', 'WATCHLIST'), ('REJECTED', 'REJECTED')] %}
+    <option value="{{ v }}" {{ 'selected' if f.status==v }}>{{ l }}</option>{% endfor %}</select>
+  <select name="strategy">
+    {% for v, l in [('', 'Toutes stratégies'), ('A', 'A Early momentum (rejetée)'), ('B', 'B Earnings momentum'), ('C', 'C Growth acceleration'), ('D', 'D Sector rotation')] %}
+    <option value="{{ v }}" {{ 'selected' if f.strategy==v }}>{{ l }}</option>{% endfor %}</select>
+  <input name="min_score" placeholder="Score min." size="8" value="{{ f.min_score }}">
+</form>
+<div id="tbl">{% include "_opportunities_table.html" %}</div>
+{% endblock %}

@@ -63,3 +63,16 @@ def test_pipeline_steps_cover_the_whole_chain():
     crit = {s.name for s in NIGHTLY if s.critical}
     assert {"ingestion", "scan", "paper", "notifications"} <= crit
     assert names.index("decouverte") < names.index("notifications")
+
+
+@pytest.mark.parametrize("name", sorted(p.name for p in WF.glob("*.yml")))
+def test_workflows_use_read_only_token_and_never_upload_data(name):
+    wf = load(name)
+    assert wf.get("permissions") == {"contents": "read"}, f"{name} : jeton non restreint"
+    for s in steps(wf):
+        uses = s.get("uses") or ""
+        if "upload-artifact" in uses:            # dépôt public : jamais la base, les cours ni une sauvegarde
+            path = str((s.get("with") or {}).get("path", ""))
+            assert not re.search(r"var/|\.db|market|backup|\.dump|\.parquet", path), f"{name} publie {path}"
+        run = s.get("run") or ""
+        assert "SH_DASHBOARD_PASSWORD_HASH" not in run or name == "dashboard-credentials.yml"
