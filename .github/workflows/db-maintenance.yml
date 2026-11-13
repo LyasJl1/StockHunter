@@ -1,0 +1,26 @@
+name: Entretien de la base
+
+# Libère de l'espace disque sur PostgreSQL (Railway, volume de 0,5 Go) : plafonne les journaux WAL, point de
+# contrôle, nettoyage des tables. Aucune donnée modifiée ; réversible. À lancer à la main en cas de disque plein.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ingestion
+  cancel-in-progress: false
+
+jobs:
+  tune:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 10
+    env:
+      SH_DATABASE_URL: ${{ secrets.SH_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[postgres]"
+      - name: Entretien
+        run: stockhunter db tune | tee -a "$GITHUB_STEP_SUMMARY"

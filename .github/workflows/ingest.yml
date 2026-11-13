@@ -56,6 +56,9 @@ jobs:
       - name: Migrations
         run: stockhunter init-db
 
+      - name: Entretien de la base (plafond des journaux PostgreSQL, nettoyage)
+        run: stockhunter db tune || echo "::warning::entretien de la base non effectué"
+
       - name: Univers
         run: stockhunter sync-universe || echo "::warning::sync-universe partiel"
 
