@@ -53,10 +53,37 @@ NIGHTLY: tuple[Step, ...] = (
 )
 
 
-def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[list[str]], int] | None = None) -> int:
-    """Exécute les étapes dans l'ordre. Renvoie 0 si aucune étape critique n'a échoué, 1 sinon."""
+def expected_session(now: datetime | None = None):
+    from zoneinfo import ZoneInfo
+
+    from stockhunter.data.calendar import last_completed_session
+    now = now or datetime.now(timezone.utc)
+    return last_completed_session(now.astimezone(ZoneInfo("America/New_York")).date())
+
+
+def already_done(engine: Engine, now: datetime | None = None) -> str | None:
+    """Séance déjà entièrement traitée (chaîne terminée sans aucun échec ni étape partielle) : renvoie la séance."""
+    with session_scope(engine) as s:
+        kv = s.get(KeyValue, KV)
+        last = json.loads(kv.value) if kv else None
+    seance = str(expected_session(now))
+    if last and last.get("final") and last.get("status") == "success" and last.get("seance") == seance:
+        return seance
+    return None
+
+
+def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[list[str]], int] | None = None,
+        force: bool = False, now: datetime | None = None) -> int:
+    """Exécute les étapes dans l'ordre. Renvoie 0 si aucune étape critique n'a échoué, 1 sinon.
+    Si la séance attendue a déjà été entièrement traitée, ne refait rien (évite les doubles collectes des
+    créneaux de secours) sauf `force`."""
     if runner is None:
         from stockhunter.cli import main as runner
+    done = None if force else already_done(engine, now)
+    if done:
+        print(f"Séance du {done} déjà entièrement traitée : rien à faire (relancer avec --force pour forcer).")
+        return 0
+    seance = str(expected_session(now))
     started = datetime.now(timezone.utc)
     results: list[dict] = []
     with session_scope(engine) as s:
@@ -78,7 +105,8 @@ def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[lis
             jr.detail = detail or None
             if final:
                 jr.finished_at = datetime.now(timezone.utc)
-            payload = json.dumps({"started": started.isoformat(), "status": status, "final": final, "steps": results},
+            payload = json.dumps({"started": started.isoformat(), "seance": seance, "status": status, "final": final,
+                                  "steps": results},
                                  ensure_ascii=False)
             kv = s.get(KeyValue, KV)
             if kv is None:

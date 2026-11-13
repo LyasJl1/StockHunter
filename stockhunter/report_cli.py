@@ -452,7 +452,7 @@ def SecEdgarProviderLazy(settings, engine):
 
 def cmd_pipeline(settings, engine, args) -> int:
     from stockhunter import pipeline
-    return pipeline.run(engine)
+    return pipeline.run(engine, force=args.force)
 
 
 def cmd_lab(settings, engine, args) -> int:
@@ -511,6 +511,7 @@ def add_parsers(sub) -> dict:
     dc.add_argument("action", choices=["run", "status"])
     pl = sub.add_parser("pipeline", help="chaîne nocturne complète (collecte → rapports), échecs critiques non masqués")
     pl.add_argument("name", choices=["nightly"])
+    pl.add_argument("--force", action="store_true", help="relancer même si la séance a déjà été traitée")
     lb = sub.add_parser("lab", help="laboratoire de recherche v3 (programme pré-enregistré, registre)")
     lb.add_argument("action", choices=["run", "registry"])
     lb.add_argument("--end", help="dernière séance utilisée AAAA-MM-JJ (défaut : toutes)")

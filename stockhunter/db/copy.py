@@ -73,32 +73,63 @@ def copy_database(src: Engine, dst: Engine, progress=print) -> dict[str, int]:
 
 
 WAL_SETTINGS = {"max_wal_size": "64MB", "min_wal_size": "32MB"}
+VOLUME_MB_DEFAULT = 500          # volume du plan gratuit Railway
+THRESHOLDS = (0.80, 0.90, 0.95)
 
 
-def tune(engine: Engine, progress=print) -> dict:
+def storage(engine: Engine, volume_mb: float | None = None) -> dict:
+    """Occupation estimée du volume PostgreSQL : toutes les bases + WAL (le reste du répertoire est négligeable).
+    Niveau : ok | attention (≥ 80 %) | alerte (≥ 90 %) | critique (≥ 95 %). Lecture seule."""
+    if engine.dialect.name != "postgresql":
+        return {"dialect": engine.dialect.name, "niveau": "ok"}
+    with engine.connect() as c:
+        dbs = c.execute(text("SELECT COALESCE(sum(pg_database_size(datname)), 0) FROM pg_database")).scalar()
+        try:
+            wal = c.execute(text("SELECT COALESCE(sum(size), 0) FROM pg_ls_waldir()")).scalar()
+        except Exception:
+            wal = None
+        max_wal = c.execute(text("SHOW max_wal_size")).scalar()
+    volume_mb = volume_mb or VOLUME_MB_DEFAULT
+    dbs = float(dbs)                                  # PostgreSQL renvoie un Decimal pour sum()
+    wal = None if wal is None else float(wal)
+    used = (dbs + (wal or 0)) / 1048576
+    share = used / volume_mb
+    level = ("critique" if share >= THRESHOLDS[2] else "alerte" if share >= THRESHOLDS[1]
+             else "attention" if share >= THRESHOLDS[0] else "ok")
+    return {"dialect": "postgresql", "bases_mo": round(dbs / 1048576, 1),
+            "wal_mo": None if wal is None else round(wal / 1048576, 1), "utilise_mo": round(used, 1),
+            "volume_mo": volume_mb, "part": round(share, 4), "niveau": level, "max_wal_size": max_wal}
+
+
+def tune(engine: Engine, progress=print, vacuum: bool = True) -> dict:
     """Entretien PostgreSQL pour un petit volume (0,5 Go) : plafonne les journaux WAL (1 Go par défaut, ce qui a
-    saturé le disque le 13/11/2026), force un point de contrôle pour libérer l'espace et nettoie les tables.
-    Réversible (`ALTER SYSTEM RESET ...`). Aucune donnée n'est modifiée. Sans effet sur SQLite."""
+    saturé le disque le 13/11/2026), force deux points de contrôle pour que PostgreSQL recycle lui-même les
+    segments devenus inutiles (aucun fichier n'est supprimé à la main), puis nettoie les tables (VACUUM simple,
+    jamais FULL) seulement si l'espace libre le permet. Réversible (`ALTER SYSTEM RESET ...`). Aucune donnée
+    modifiée. Sans effet sur SQLite."""
     if engine.dialect.name != "postgresql":
         progress("Base SQLite : aucun réglage nécessaire.")
         return {}
-    out = {}
+    out = {"avant": storage(engine)}
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
-        def sizes(tag):
-            out[f"base_{tag}_mo"] = round(c.execute(text("SELECT pg_database_size(current_database())")).scalar() / 1048576, 1)
-            try:
-                out[f"wal_{tag}_mo"] = round((c.execute(text("SELECT COALESCE(sum(size), 0) FROM pg_ls_waldir()")).scalar() or 0) / 1048576, 1)
-            except Exception:                               # droit absent : information facultative
-                out[f"wal_{tag}_mo"] = None
-        sizes("avant")
+        changed = []
         for k, v in WAL_SETTINGS.items():
             if c.execute(text(f"SHOW {k}")).scalar() != v:
                 c.execute(text(f"ALTER SYSTEM SET {k} = '{v}'"))
-        c.execute(text("SELECT pg_reload_conf()"))
+                changed.append(k)
+        if changed:
+            c.execute(text("SELECT pg_reload_conf()"))
+        out["reglages_modifies"] = changed
         c.execute(text("CHECKPOINT"))
         c.execute(text("CHECKPOINT"))                       # le second recycle les segments libérés par le premier
-        c.execute(text("VACUUM (ANALYZE)"))
-        sizes("apres")
+    out["apres_checkpoint"] = storage(engine)
+    if vacuum and out["apres_checkpoint"]["part"] < THRESHOLDS[2]:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+            c.execute(text("VACUUM (ANALYZE)"))
+        out["vacuum"] = "fait"
+    else:
+        out["vacuum"] = "non fait (désactivé ou espace libre insuffisant)"
+    out["apres"] = storage(engine)
     progress(f"Entretien PostgreSQL : {out}")
     return out
 

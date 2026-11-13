@@ -62,3 +62,25 @@ def test_failure_is_recorded_before_notifications_so_alert_goes_out_same_night(e
         return 1 if argv[0] == "c" else 0
     assert pipeline.run(engine, STEPS, runner) == 1
     assert seen["status"] == "failed"
+
+
+def test_already_processed_session_is_skipped_unless_forced(engine):
+    """Créneaux de secours : une séance entièrement traitée ne relance ni collecte ni scan (quotas, doublons)."""
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 14, 6, 0, tzinfo=timezone.utc)              # samedi matin : séance attendue = 13/11
+    calls = []
+    runner = lambda argv: calls.append(argv[0]) or 0
+    assert pipeline.run(engine, STEPS, runner, now=now) == 0 and len(calls) == 4
+    assert pipeline.run(engine, STEPS, runner, now=now) == 0 and len(calls) == 4       # rien refait
+    assert pipeline.run(engine, STEPS, runner, now=now, force=True) == 0 and len(calls) == 8
+    later = datetime(2026, 11, 17, 23, 30, tzinfo=timezone.utc)          # lundi soir : nouvelle séance
+    assert pipeline.run(engine, STEPS, runner, now=later) == 0 and len(calls) == 12
+
+
+def test_partial_run_is_retried_by_the_next_slot(engine):
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 14, 6, 0, tzinfo=timezone.utc)
+    calls = []
+    pipeline.run(engine, STEPS, lambda argv: calls.append(argv[0]) or (2 if argv[0] == "a" else 0), now=now)
+    pipeline.run(engine, STEPS, lambda argv: calls.append(argv[0]) or 0, now=now)
+    assert calls.count("a") == 2                                          # quota atteint au 1er passage : repris

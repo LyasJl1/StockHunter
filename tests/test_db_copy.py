@@ -76,9 +76,26 @@ def test_tune_is_safe_on_any_database(engine):
     from stockhunter.db.copy import tune
     out = tune(engine, progress=lambda m: None)
     if engine.dialect.name == "postgresql":
-        assert out["base_apres_mo"] > 0
+        assert out["apres"]["bases_mo"] > 0 and out["apres"]["niveau"] in ("ok", "attention", "alerte", "critique")
+        assert out["vacuum"] == "fait"
         with engine.connect() as c:
             from sqlalchemy import text
             assert c.execute(text("SHOW max_wal_size")).scalar() == "64MB"
     else:
         assert out == {}
+
+
+def test_storage_levels(engine, monkeypatch):
+    from stockhunter.db import copy as dbc
+    if engine.dialect.name != "postgresql":
+        assert dbc.storage(engine)["niveau"] == "ok"
+        return
+    used = dbc.storage(engine)["utilise_mo"]
+    assert dbc.storage(engine, volume_mb=used / 0.5)["niveau"] == "ok"
+    assert dbc.storage(engine, volume_mb=used / 0.85)["niveau"] == "attention"
+    assert dbc.storage(engine, volume_mb=used / 0.92)["niveau"] == "alerte"
+    assert dbc.storage(engine, volume_mb=used / 0.97)["niveau"] == "critique"
+    # espace insuffisant : pas de VACUUM (il a besoin de place), le point de contrôle reste fait
+    monkeypatch.setattr(dbc, "VOLUME_MB_DEFAULT", used / 0.99)
+    out = dbc.tune(engine, progress=lambda m: None)
+    assert out["vacuum"].startswith("non fait")

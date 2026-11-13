@@ -40,7 +40,9 @@ jobs:
       - name: Chargement (arrêt propre à 160 min, reprise au prochain lancement)
         run: |
           set -o pipefail
-          timeout 160m stockhunter market sync --reference 2>&1 | tee sync.log || echo "::warning::chargement incomplet - relancer ce workflow"
+          # arrêt volontaire à 160 min (code 124) = chargement partiel, à relancer ; tout autre échec rend le job rouge
+          code=0; timeout 160m stockhunter market sync --reference 2>&1 | tee sync.log || code=$?
+          if [ "$code" = 124 ]; then echo "::warning::chargement incomplet (160 min) - relancer ce workflow"; elif [ "$code" != 0 ]; then exit "$code"; fi
 
       - name: Diagnostic
         if: always()
