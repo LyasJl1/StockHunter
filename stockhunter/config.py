@@ -55,7 +55,9 @@ class Settings(BaseSettings):
     report_morning_hour_paris: int = 8      # rapport du matin, heure de Paris (changements d'heure gérés)
 
     db_volume_mb: float = 500.0            # volume PostgreSQL (Railway gratuit : 500 Mo) pour les seuils 80/90/95 %
-    db_fs_overhead_mb: float = 0.0         # réserve du système de fichiers hors répertoire de données (calibrée sur Railway)
+    # Espace du volume hors répertoire de données (métadonnées du système de fichiers, etc.). Calibré le 13/11/2026 :
+    # Railway mesurait 496 Mo utilisés pour 407 Mo de répertoire de données PostgreSQL -> 89 Mo.
+    db_fs_overhead_mb: float = 89.0
     dashboard_password_hash: SecretStr | None = None   # hachage scrypt (stockhunter dashboard hash-password)
     dashboard_secret: SecretStr | None = None          # clé de signature des sessions (32+ caractères aléatoires)
 

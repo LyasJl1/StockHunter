@@ -126,21 +126,38 @@ def reclaim_wal(engine: Engine, progress=print, target_files: int = 4, max_round
     PostgreSQL ne supprime un segment que lorsqu'il est derrière le point de reprise d'un point de contrôle ; les
     segments « recyclés » d'avance (240 Mo le 13/11/2026) ne le deviennent qu'une fois traversés. `pg_switch_wal()`
     fait passer au segment suivant sans écrire 16 Mo ; le CHECKPOINT qui suit laisse alors PostgreSQL supprimer ce
-    qui dépasse le plafond `max_wal_size`. Opérations standard, sans perte de données."""
-    rounds = []
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
-        count = lambda: int(c.execute(text("SELECT count(*) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{24}$'")).scalar())
-        start = count()
-        for _ in range(max_rounds):
-            n = count()
-            rounds.append(n)
-            if n <= target_files:
+    qui dépasse le plafond `max_wal_size`. Opérations standard, sans perte de données. Une connexion par tour,
+    avec reprise : une coupure réseau (proxy Railway) n'interrompt pas l'opération."""
+    import time as _time
+
+    def count(c):
+        return int(c.execute(text("SELECT count(*) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{24}$'")).scalar())
+
+    rounds, errors, start = [], [], None
+    for _ in range(max_rounds):
+        try:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+                n = count(c)
+                start = n if start is None else start
+                rounds.append(n)
+                if n <= target_files:
+                    break
+                c.execute(text("SELECT pg_switch_wal()"))
+                c.execute(text("CHECKPOINT"))
+        except Exception as exc:                     # coupure : on attend, on se reconnecte, on reprend
+            errors.append(str(exc).splitlines()[0][:120])
+            if len(errors) >= 5:
                 break
-            c.execute(text("SELECT pg_switch_wal()"))
-            c.execute(text("CHECKPOINT"))
-        end = count()
-    out = {"segments_avant": start, "segments_apres": end, "tours": len(rounds) - 1,
-           "libere_mo": (start - end) * 16}
+            _time.sleep(5)
+            engine.dispose()
+    try:
+        with engine.connect() as c:
+            end = count(c)
+    except Exception as exc:
+        end = None
+        errors.append(str(exc).splitlines()[0][:120])
+    out = {"segments_avant": start, "segments_apres": end, "tours": len(rounds),
+           "libere_mo": None if start is None or end is None else (start - end) * 16, "incidents": errors}
     progress(f"Récupération WAL : {out}")
     return out
 

@@ -2,10 +2,13 @@
 {% block content %}
 {% set st = {'ok': 'OK', 'warning': 'partiel', 'failed': 'ÉCHEC'} %}
 {% if v.stale.stale %}<div class="banner" style="border-color:var(--neg)">⚠️ Données en retard : dernière clôture {{ v.last_price|d }}, séance attendue {{ v.stale.expected|d }}.</div>{% endif %}
+<div class="card" style="margin-bottom:16px"><h2>État de fonctionnement</h2>
+  <table>{% for c in v.checks %}<tr><td>{{ '✅' if c.ok else '❌' }}</td><td><b>{{ c.label }}</b></td><td class="sub">{{ c.detail }}</td></tr>{% endfor %}</table>
+  <p class="sub">Une CI verte ne prouve pas que la production fonctionne : ces contrôles lisent l'état réel de la base de production.</p></div>
 <div class="grid g4">
   <div class="card"><h2>Chaîne nocturne</h2>{% if v.pipeline %}<div class="kpi {{ 'neg' if v.pipeline.status == 'failed' else 'pos' if v.pipeline.status == 'success' else '' }}">{{ {'success': 'OK', 'partial': 'Partielle', 'failed': 'ÉCHEC'}[v.pipeline.status] }}</div><div class="sub">lancée le {{ v.pipeline.started[:16]|replace('T', ' ') }} UTC{{ '' if v.pipeline.final else ' · en cours' }}</div>{% else %}<div class="kpi">—</div><div class="sub">aucune exécution enregistrée</div>{% endif %}</div>
   <div class="card"><h2>Fraîcheur</h2><div class="kpi {{ 'neg' if v.stale.stale else 'pos' }}">{{ v.last_price|d }}</div><div class="sub">dernière clôture en base · découverte : {{ v.last_discovery|d }}</div></div>
-  <div class="card"><h2>Base de données</h2><div class="kpi {{ 'neg' if (v.db_share or 0) > 0.8 }}">{{ ((v.db.bytes or 0) / 1048576)|num(0) }} Mo</div><div class="sub">{{ v.db.dialect }} {{ v.db.version or '' }} · {{ ((v.db_share or 0) * 100)|num(0) }} % du volume gratuit (500 Mo){% if not v.db.ok %} · <span class="neg">{{ v.db.error }}</span>{% endif %}</div></div>
+  <div class="card"><h2>Espace disque</h2><div class="kpi {{ 'neg' if (v.db_share or 0) >= 0.8 }}">{% if v.disk.utilise_mo is defined %}{{ v.disk.utilise_mo|num(0) }} Mo{% else %}—{% endif %}</div><div class="sub">{% if v.disk.utilise_mo is defined %}{{ ((v.db_share or 0) * 100)|num(0) }} % de {{ v.disk.volume_mo|num(0) }} Mo · données {{ v.disk.bases_mo|num(0) }} Mo · WAL {{ v.disk.wal_mo if v.disk.wal_mo is not none else 'N/D' }} Mo · seuils 80 / 90 / 95 %{% else %}{{ v.db.dialect }}{% endif %}{% if not v.db.ok %} · <span class="neg">{{ v.db.error }}</span>{% endif %}</div></div>
   <div class="card"><h2>Telegram</h2><div class="kpi">{{ v.notif.get('SENT', 0) }}</div><div class="sub">envoyés sur 7 jours · {{ v.notif.get('FAILED', 0) }} échec(s) · {{ v.notif.get('PENDING', 0) }} en attente<br>lecteur des commandes : {% if v.reader %}{{ v.reader.owner }}{{ '' if v.reader.active else ' (inactif)' }}{% else %}aucun{% endif %}</div></div>
 </div>
 <div class="grid g2" style="margin-top:16px">
