@@ -1,0 +1,31 @@
+name: Diagnostic de la base
+
+# Diagnostic EN LECTURE SEULE de l'espace PostgreSQL de production (aucune écriture, aucune maintenance).
+# N'affiche que des tailles, des compteurs et des réglages : jamais de données ni de chaîne de connexion.
+on:
+  workflow_dispatch:
+  push:
+    branches: [stockhunter-v3-1-fixes]
+    paths: ["docs/ops/diagnostics/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 10
+    env:
+      SH_DATABASE_URL: ${{ secrets.SH_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[postgres]"
+      - name: Diagnostic
+        run: |
+          test -n "$SH_DATABASE_URL" || { echo "::error::secret SH_DATABASE_URL absent"; exit 1; }
+          stockhunter db diag | tee diag.json
+          { echo '```json'; cat diag.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

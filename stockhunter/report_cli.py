@@ -367,6 +367,10 @@ def cmd_db(settings, engine, args) -> int:
     if args.action == "tune":
         tune(engine)
         return 0
+    if args.action == "diag":
+        from stockhunter.db.copy import diagnose
+        print(json.dumps(diagnose(engine), ensure_ascii=False, indent=1, default=str))
+        return 0
     if not args.target:
         print("ÉCHEC : URL de la base cible manquante")
         return 1
@@ -541,7 +545,7 @@ def add_parsers(sub) -> dict:
     db.add_argument("--insecure-cookies", action="store_true", help="HTTP local uniquement (pas de HTTPS)")
     db.add_argument("--telegram-worker", action="store_true", help="répondre aux commandes Telegram en continu")
     cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
-    cp.add_argument("action", choices=["copy-to", "tune"])
+    cp.add_argument("action", choices=["copy-to", "tune", "diag"])
     cp.add_argument("target", nargs="?", help="copy-to : URL de la base cible, déjà migrée et vide")
     return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "pipeline": cmd_pipeline, "discover": cmd_discover, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
