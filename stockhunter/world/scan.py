@@ -41,6 +41,7 @@ CCY_SYMBOL = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "INR": "₹", 
 MIN_SESSIONS = UniverseFilter().min_history          # 130 séances : même exigence que pour les États-Unis
 MAX_JUMP = {"euronext": 0.45, "nse": 0.45, "bse": 0.45}
 UNIT_RISK = 1_000_000.0                               # même convention de suivi unitaire que discovery/store.py
+SECONDARY_OF = {"XBOM": "XNSE"}                       # place -> place principale des mêmes sociétés (même ISIN)
 
 
 def _adjust_factors(long: pd.DataFrame) -> pd.Series:
@@ -68,6 +69,13 @@ def build_market_panel(store: WorldStore, code: str, fx: FxTable, max_sessions: 
         return None, info
     long = store.load(code, days[0], days[-1])
     long = long[long["traded"].astype(bool)]
+    secondary = SECONDARY_OF.get(code)
+    if secondary:                                     # listing secondaire : les sociétés cotées sur la place
+        prim = store.stored_sessions(secondary)        # principale y sont scannées, pas ici (pas de doublon)
+        if prim:
+            dup = set(pd.read_parquet(store.path(secondary, prim[-1]), columns=["isin"])["isin"])
+            info["exclus_listing_principal"] = int(long.loc[long["isin"].isin(dup), "isin"].nunique())
+            long = long[~long["isin"].isin(dup)]
     last = long.sort_values("date").drop_duplicates("isin", keep="last")
     info["noms"] = {r.isin: (r.ticker, r.name) for r in last.itertuples(index=False)}   # symbole le plus récent
     f = _adjust_factors(long)

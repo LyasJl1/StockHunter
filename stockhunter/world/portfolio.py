@@ -104,7 +104,10 @@ def simulate(signals: list[SignalIn], bars: dict[tuple[str, str], pd.DataFrame],
              cfg: GlobalConfig = GlobalConfig(), rules: Rules = Rules()) -> Result:
     """`bars[(place, clé)]` : DataFrame indexé par date (Timestamp) avec open/high/low/close en devise locale,
     ajustés des divisions, uniquement les séances où le titre a coté."""
-    dates = sorted({d for df in bars.values() for d in df.index} | {pd.Timestamp(s.as_of) for s in signals})
+    first = min((pd.Timestamp(s.as_of) for s in signals), default=None)
+    # la courbe commence au premier signal : pas de mois de trésorerie oisive avant toute sélection
+    dates = sorted(d for d in ({d for df in bars.values() for d in df.index} | {pd.Timestamp(s.as_of) for s in signals})
+                   if first is not None and d >= first)
     if not dates:
         return Result(pd.Series(dtype=float), [], [], {"statut": "aucune donnée"})
     sessions_by_market: dict[str, set] = {}

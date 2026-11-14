@@ -39,7 +39,12 @@
    "top_vs_univers_net_25pb": 0.0124,
    "decision": "NON RETENU",
    "source": "docs/research/2026-11-12-resultats-univers-large.md",
-   "reprise": true
+   "reprise": true,
+   "p_ajustees": {
+    "p": 0.1547,
+    "holm": 1.0,
+    "bh": 0.3745
+   }
   },
   {
    "id": "broad-H2",
@@ -56,7 +61,12 @@
    "decision": "NON RETENU",
    "source": "docs/research/2026-11-12-resultats-univers-large.md",
    "reprise": true,
-   "note": "stat et t exprimés dans le sens attendu"
+   "note": "stat et t exprimés dans le sens attendu",
+   "p_ajustees": {
+    "p": 0.0762,
+    "holm": 1.0,
+    "bh": 0.3354
+   }
   },
   {
    "id": "broad-H3",
@@ -72,7 +82,12 @@
    "top_vs_univers_net_25pb": 0.0038,
    "decision": "NON RETENU",
    "source": "docs/research/2026-11-12-resultats-univers-large.md",
-   "reprise": true
+   "reprise": true,
+   "p_ajustees": {
+    "p": 0.1114,
+    "holm": 1.0,
+    "bh": 0.3745
+   }
   },
   {
    "id": "broad-H4",
@@ -89,7 +104,12 @@
    "decision": "NON RETENU",
    "source": "docs/research/2026-11-12-resultats-univers-large.md",
    "reprise": true,
-   "note": "stat et t exprimés dans le sens attendu"
+   "note": "stat et t exprimés dans le sens attendu",
+   "p_ajustees": {
+    "p": 0.174,
+    "holm": 1.0,
+    "bh": 0.3745
+   }
   },
   {
    "id": "broad-H5",
@@ -105,7 +125,12 @@
    "top_vs_univers_net_25pb": -0.0086,
    "decision": "NON RETENU",
    "source": "docs/research/2026-11-12-resultats-univers-large.md",
-   "reprise": true
+   "reprise": true,
+   "p_ajustees": {
+    "p": 0.9494,
+    "holm": 1.0,
+    "bh": 0.9494
+   }
   },
   {
    "id": "broad-H6",
@@ -121,7 +146,12 @@
    "top_vs_univers_net_25pb": -0.0012,
    "decision": "NON RETENU",
    "source": "docs/research/2026-11-12-resultats-univers-large.md",
-   "reprise": true
+   "reprise": true,
+   "p_ajustees": {
+    "p": 0.2996,
+    "holm": 1.0,
+    "bh": 0.5243
+   }
   },
   {
    "id": "broad-H7",
@@ -137,7 +167,12 @@
    "top_vs_univers_net_25pb": -0.009,
    "decision": "NON RETENU",
    "source": "docs/research/2026-11-12-resultats-univers-large.md",
-   "reprise": true
+   "reprise": true,
+   "p_ajustees": {
+    "p": 0.658,
+    "holm": 1.0,
+    "bh": 0.8128
+   }
   },
   {
    "id": "broad-C",
@@ -153,7 +188,12 @@
    "top_vs_univers_net_25pb": -0.0055,
    "decision": "NON RETENU",
    "source": "docs/research/2026-11-12-resultats-univers-large.md",
-   "reprise": true
+   "reprise": true,
+   "p_ajustees": {
+    "p": 0.567,
+    "holm": 1.0,
+    "bh": 0.7442
+   }
   },
   {
    "id": "v3-V1",
@@ -178,7 +218,12 @@
    "t": 0.9555601877848023,
    "top_vs_univers_net_25pb": 0.007564261682844817,
    "decision": "NON TESTABLE",
-   "holdout_consulte": false
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.1784,
+    "holm": 1.0,
+    "bh": 0.3745
+   }
   },
   {
    "id": "v3-V2",
@@ -203,7 +248,12 @@
    "t": 1.489978072037959,
    "top_vs_univers_net_25pb": 0.007331246543324341,
    "decision": "NON RETENU",
-   "holdout_consulte": false
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.0722,
+    "holm": 1.0,
+    "bh": 0.3354
+   }
   },
   {
    "id": "v3-V3",
@@ -229,7 +279,12 @@
    "top_vs_univers_net_25pb": 0.011170511290136648,
    "decision": "NON RETENU",
    "holdout_consulte": false,
-   "note": "Définition exacte du code : moyenne ÷ écart-type des résidus d'une régression sans constante sur le marché équipondéré (titre inclus) ; même classement que « somme ÷ écart-type » du protocole."
+   "note": "Définition exacte du code : moyenne ÷ écart-type des résidus d'une régression sans constante sur le marché équipondéré (titre inclus) ; même classement que « somme ÷ écart-type » du protocole.",
+   "p_ajustees": {
+    "p": 0.0543,
+    "holm": 1.0,
+    "bh": 0.3354
+   }
   },
   {
    "id": "v3-V4",
@@ -254,7 +309,12 @@
    "t": 1.4382174405524413,
    "top_vs_univers_net_25pb": 0.006001798041911247,
    "decision": "NON RETENU",
-   "holdout_consulte": false
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.0793,
+    "holm": 1.0,
+    "bh": 0.3354
+   }
   },
   {
    "id": "v3-V9",
@@ -279,7 +339,12 @@
    "t": -0.7844274262057425,
    "top_vs_univers_net_25pb": -0.014830959028067043,
    "decision": "NON RETENU",
-   "holdout_consulte": false
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.7812,
+    "holm": 1.0,
+    "bh": 0.8634
+   }
   },
   {
    "id": "v3-MF",
@@ -304,7 +369,12 @@
    "t": 0.6424392245902227,
    "top_vs_univers_net_25pb": -0.010359176311151769,
    "decision": "NON RETENU",
-   "holdout_consulte": false
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.2623,
+    "holm": 1.0,
+    "bh": 0.5008
+   }
   },
   {
    "id": "v3-ML-ridge",
@@ -329,7 +399,12 @@
    "t": -1.460837608558524,
    "top_vs_univers_net_25pb": -0.013428571660347471,
    "decision": "NON RETENU (ne bat pas la référence simple)",
-   "holdout_consulte": false
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.9206,
+    "holm": 1.0,
+    "bh": 0.9494
+   }
   },
   {
    "id": "v3-ML-gbm",
@@ -355,7 +430,147 @@
    "top_vs_univers_net_25pb": -0.0051224246858410875,
    "decision": "NON RETENU (ne bat pas la référence simple)",
    "holdout_consulte": false,
-   "note": "Écart au protocole relevé par la revue indépendante du 13/11/2026 : exécuté avec l'arrêt anticipé de scikit-learn (moins de 100 arbres possibles). Aucune fuite d'information ; résultat conservé tel quel, non ré-exécuté pour ne pas ajouter un test à la famille. Code corrigé (early_stopping=False) pour toute exécution future."
+   "note": "Écart au protocole relevé par la revue indépendante du 13/11/2026 : exécuté avec l'arrêt anticipé de scikit-learn (moins de 100 arbres possibles). Aucune fuite d'information ; résultat conservé tel quel, non ré-exécuté pour ne pas ajouter un test à la famille. Code corrigé (early_stopping=False) pour toute exécution future.",
+   "p_ajustees": {
+    "p": 0.7633,
+    "holm": 1.0,
+    "bh": 0.8634
+   }
+  },
+  {
+   "id": "intl-XNSE-momentum",
+   "type": "test",
+   "programme": "3.2-international",
+   "date": "2026-11-14",
+   "hypothese": "Catégorie « Momentum » (moteur 3.0.0 figé) sur XNSE : écart net à 20 séances vs univers de la place",
+   "famille": "international",
+   "sens_attendu": 1,
+   "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
+   "code": "bbd9fc7",
+   "donnees": {
+    "place": "XNSE",
+    "premiere_date_signal": "2026-03-05",
+    "derniere_date_signal": "2026-10-07"
+   },
+   "periode": "hors échantillon (règles jamais développées sur cette place)",
+   "dates": 27,
+   "stat": 0.02118577437856148,
+   "t": 1.4474089116604096,
+   "decision": "NON RETENU",
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.0799,
+    "holm": 1.0,
+    "bh": 0.3354
+   }
+  },
+  {
+   "id": "intl-XNSE-breakout",
+   "type": "test",
+   "programme": "3.2-international",
+   "date": "2026-11-14",
+   "hypothese": "Catégorie « Sortie de consolidation » (moteur 3.0.0 figé) sur XNSE : écart net à 20 séances vs univers de la place",
+   "famille": "international",
+   "sens_attendu": 1,
+   "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
+   "code": "bbd9fc7",
+   "donnees": {
+    "place": "XNSE",
+    "premiere_date_signal": "2026-03-05",
+    "derniere_date_signal": "2026-10-07"
+   },
+   "periode": "hors échantillon (règles jamais développées sur cette place)",
+   "dates": 30,
+   "stat": 0.013540460004986586,
+   "t": 0.9469327880308404,
+   "decision": "NON RETENU",
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.1757,
+    "holm": 1.0,
+    "bh": 0.3745
+   }
+  },
+  {
+   "id": "intl-XNSE-steady",
+   "type": "test",
+   "programme": "3.2-international",
+   "date": "2026-11-14",
+   "hypothese": "Catégorie « Tendance régulière à faible risque » (moteur 3.0.0 figé) sur XNSE : écart net à 20 séances vs univers de la place",
+   "famille": "international",
+   "sens_attendu": 1,
+   "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
+   "code": "bbd9fc7",
+   "donnees": {
+    "place": "XNSE",
+    "premiere_date_signal": "2026-03-05",
+    "derniere_date_signal": "2026-10-07"
+   },
+   "periode": "hors échantillon (règles jamais développées sur cette place)",
+   "dates": 27,
+   "stat": 0.0015631308358607788,
+   "t": 0.14469354245194305,
+   "decision": "NON RETENU",
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.443,
+    "holm": 1.0,
+    "bh": 0.6202
+   }
+  },
+  {
+   "id": "intl-XNSE-shock",
+   "type": "test",
+   "programme": "3.2-international",
+   "date": "2026-11-14",
+   "hypothese": "Catégorie « Choc d'information » (moteur 3.0.0 figé) sur XNSE : écart net à 20 séances vs univers de la place",
+   "famille": "international",
+   "sens_attendu": 1,
+   "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
+   "code": "bbd9fc7",
+   "donnees": {
+    "place": "XNSE",
+    "premiere_date_signal": "2026-03-05",
+    "derniere_date_signal": "2026-10-07"
+   },
+   "periode": "hors échantillon (règles jamais développées sur cette place)",
+   "dates": 29,
+   "stat": 0.003635928504803541,
+   "t": 0.1785470509079708,
+   "decision": "NON RETENU",
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.4298,
+    "holm": 1.0,
+    "bh": 0.6202
+   }
+  },
+  {
+   "id": "intl-XNSE-watch",
+   "type": "test",
+   "programme": "3.2-international",
+   "date": "2026-11-14",
+   "hypothese": "Catégorie « À surveiller » (moteur 3.0.0 figé) sur XNSE : écart net à 20 séances vs univers de la place",
+   "famille": "international",
+   "sens_attendu": 1,
+   "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
+   "code": "bbd9fc7",
+   "donnees": {
+    "place": "XNSE",
+    "premiere_date_signal": "2026-03-05",
+    "derniere_date_signal": "2026-10-07"
+   },
+   "periode": "hors échantillon (règles jamais développées sur cette place)",
+   "dates": 30,
+   "stat": 0.002735317943502268,
+   "t": 0.35753122412741634,
+   "decision": "NON RETENU",
+   "holdout_consulte": false,
+   "p_ajustees": {
+    "p": 0.3616,
+    "holm": 1.0,
+    "bh": 0.5842
+   }
   }
  ],
  "executions": [
@@ -374,6 +589,27 @@
    "duree_s": 83,
    "memoire_max_mo": 1618,
    "resume": "aucun facteur CANDIDAT ; aucun modèle ML retenu ; période réservée non consultée"
+  },
+  {
+   "programme": "3.2-international",
+   "date": "2026-11-14",
+   "commit": "bbd9fc7",
+   "workflow_run": 43598324437,
+   "tests": [
+    "intl-XNSE-momentum",
+    "intl-XNSE-breakout",
+    "intl-XNSE-steady",
+    "intl-XNSE-shock",
+    "intl-XNSE-watch"
+   ],
+   "donnees": {
+    "seances": 30,
+    "titres": null,
+    "empreinte": "XNSE"
+   },
+   "duree_s": null,
+   "memoire_max_mo": null,
+   "resume": "XNSE : 5 catégories NON RETENU (t de 0,14 à 1,45 < 3,0) ; dates de signal 05/03 → 07/10/2026"
   }
  ],
  "notes": [

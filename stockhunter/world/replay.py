@@ -97,7 +97,13 @@ def register(results: list[dict], meta: dict, reg_path=None) -> dict:
                      "holdout_consulte": False}
             reg["experiences"] = [e for e in reg["experiences"] if e.get("id") != eid] + [entry]
     reg["executions"].append({"programme": "3.2-international", "date": meta["date"], "commit": meta.get("commit"),
-                              "workflow_run": meta.get("workflow_run"), "tests": ids})
+                              "workflow_run": meta.get("workflow_run"), "tests": ids,
+                              "donnees": {"seances": sum(r.get("dates_signal", 0) for r in results),
+                                          "titres": None, "empreinte": ", ".join(r["place"] for r in results)},
+                              "duree_s": meta.get("duree_s"), "memoire_max_mo": None,
+                              "resume": "; ".join(f"{r['place']} : " + ", ".join(
+                                  f"{k} {c['decision'].split(' (')[0]}" for k, c in r["categories"].items())
+                                  for r in results)})
     fam = R.family_pvalues(reg)
     for e in reg["experiences"]:
         if e.get("id") in fam:

@@ -61,7 +61,7 @@ def fx_table(start: date, end: date, usd: float = 1.10, inr: float = 95.0, nok: 
 
 def synth_market(store, code: str, n_sessions: int, n_stocks: int = 40, end: date = date(2026, 11, 13),
                  seed: int = 7, currency: str | None = None, trend_first: int = 6, turnover_scale: float = 5e7,
-                 isin_prefix: str = "ZZ") -> list[date]:
+                 isin_prefix: str = "ZZ", isin_market: str | None = None) -> list[date]:
     """Écrit `n_sessions` séances d'une place dans le stockage ; les `trend_first` premiers titres montent."""
     m = mk.get(code)
     ss = [s.session for s in mk.sessions(m, date(2020, 1, 1), end)][-n_sessions:]
@@ -76,7 +76,7 @@ def synth_market(store, code: str, n_sessions: int, n_stocks: int = 40, end: dat
         rows = []
         for j in range(n_stocks):
             vol = 1_000_000.0
-            rows.append({"date": d, "market": code, "ticker": f"ZZ{j:02d}", "isin": f"{isin_prefix}{code[:2]}{j:08d}",
+            rows.append({"date": d, "market": code, "ticker": f"ZZ{j:02d}", "isin": f"{isin_prefix}{(isin_market or code)[:2]}{j:08d}",
                          "name": f"ZZ Synthétique {j}", "currency": currency or m.currency, "segment": "Réglementé",
                          "open": o[j], "high": hi[j], "low": lo[j], "close": price[j], "volume": vol,
                          "turnover": turnover_scale, "prev_close_adj": None, "lot_size": 1, "traded": True})

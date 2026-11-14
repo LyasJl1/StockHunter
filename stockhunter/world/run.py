@@ -291,7 +291,7 @@ def status_text(engine: Engine, store: WorldStore) -> str:
             continue
         ls = r["listings"] or {}
         sc = r.get("scanner") or {}
-        lines.append(f"  {r['code']:5} {r['nom'][:38]:38} {r['donnees'][:26]:26} listings {ls.get('actifs', 0):5}  "
+        lines.append(f"  {r['code']:5} {r['nom'][:38]:38} {r['donnees'][:26]:26} listings {ls.get('actifs', 0):5} (principal {ls.get('principal', 0):5})  "
                      f"séances {r['seances'] if r['seances'] is not None else '—':>4}  dernière {r['derniere'] or '—'}  "
                      f"{r.get('fraicheur', '')}  scanner {sc.get('statut', '—')} ({sc.get('univers', 0)} analysées)")
     na = [r["code"] for r in market_table(engine, store) if r["donnees"] == mk.NONE]

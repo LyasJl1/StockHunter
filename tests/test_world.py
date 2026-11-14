@@ -464,3 +464,11 @@ def test_replay_is_point_in_time_and_registered(store, tmp_path):
     out = rp.register([res], {"date": "2026-11-14", "commit": "test"}, reg)       # réexécution : pas de doublon
     assert out["famille"] == n0 + 5
     assert rp.replay(WorldStore(tmp_path / "vide"), "XPAR", fx)["statut"] == "NON TESTABLE"
+
+
+def test_bse_scan_excludes_companies_listed_on_nse(store):
+    fx = fx_table(date(2025, 1, 1), D)
+    synth_market(store, "XNSE", 30, 10, turnover_scale=5e9)
+    synth_market(store, "XBOM", 30, 10, turnover_scale=5e9, isin_market="XNSE")   # mêmes ISIN : doublons
+    p, info = ws.build_market_panel(store, "XBOM", fx)
+    assert info["exclus_listing_principal"] == 10 and (p is None or p.close.shape[1] == 0)
