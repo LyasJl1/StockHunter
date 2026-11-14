@@ -97,7 +97,7 @@ def build_market_panel(store: WorldStore, code: str, fx: FxTable, max_sessions: 
     idx = pd.DatetimeIndex(pd.to_datetime(days))
     frames = {k: wide(k).reindex(idx) for k in ("open", "high", "low", "close", "volume", "raw_close", "turnover")}
     # troncature à la dernière discontinuité inexpliquée
-    jump = MAX_JUMP.get(m.providers[0], 0.45)
+    jump = MAX_JUMP.get(m.providers[0] if m.providers else "import", 0.45)
     ret = frames["close"].pct_change(fill_method=None)
     bad = ret.abs() > jump
     last_bad = bad[::-1].cumsum()[::-1] > 0          # vrai sur et avant la dernière discontinuité

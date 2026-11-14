@@ -602,7 +602,7 @@ class WorldListing(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     market: Mapped[str] = mapped_column(String(8))           # code du registre (stockhunter/world/markets.py)
-    isin: Mapped[str] = mapped_column(String(12))
+    isin: Mapped[str] = mapped_column(String(40))   # ISIN, ou « YF:<symbole> » pour un import sans ISIN (3.3)
     ticker: Mapped[str] = mapped_column(String(30))
     name: Mapped[str | None] = mapped_column(String(255))
     country: Mapped[str] = mapped_column(String(2))          # pays de la place (pas forcément celui de l'émetteur)
@@ -627,7 +627,7 @@ class WorldTickerChange(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     market: Mapped[str] = mapped_column(String(8))
-    isin: Mapped[str] = mapped_column(String(12))
+    isin: Mapped[str] = mapped_column(String(40))   # ISIN, ou « YF:<symbole> » pour un import sans ISIN (3.3)
     old_ticker: Mapped[str] = mapped_column(String(30))
     new_ticker: Mapped[str] = mapped_column(String(30))
     changed_on: Mapped[date] = mapped_column(Date)
@@ -661,7 +661,7 @@ class WorldSignal(Base):
     scan_id: Mapped[int] = mapped_column(ForeignKey("world_scans.id", ondelete="CASCADE"), index=True)
     market: Mapped[str] = mapped_column(String(8))
     as_of: Mapped[date] = mapped_column(Date)
-    isin: Mapped[str] = mapped_column(String(12))
+    isin: Mapped[str] = mapped_column(String(40))   # ISIN, ou « YF:<symbole> » pour un import sans ISIN (3.3)
     ticker: Mapped[str] = mapped_column(String(30))
     name: Mapped[str | None] = mapped_column(String(255))
     category: Mapped[str] = mapped_column(String(20))

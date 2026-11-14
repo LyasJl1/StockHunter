@@ -7,8 +7,6 @@ catégorie, et fournit les sélections rejouées au portefeuille mondial simulé
 
 from __future__ import annotations
 
-import math
-from datetime import date
 from typing import Any
 
 import numpy as np

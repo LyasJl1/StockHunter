@@ -15,7 +15,7 @@ on:
         description: "fichiers au plus par place et par passage"
         default: "320"
   push:
-    branches: [stockhunter-v3-2, stockhunter-v3-2-1-fixes]
+    branches: [stockhunter-v3-2, stockhunter-v3-2-1-fixes, stockhunter-v3-3-yahoo]
     paths: ["stockhunter/world/**", ".github/workflows/world-verify.yml"]
 
 permissions:
@@ -32,8 +32,8 @@ jobs:
     env:
       SH_DATABASE_URL: sqlite:///var-verify/verify.db
       SH_WORLD_DIR: var-verify/world
-      SH_WORLD_NSE_AUTHORIZED: "false"   # test de sécurité : aucun accès NSE autorisé
-      SH_WORLD_BSE_AUTHORIZED: "false"   # idem BSE
+      SH_WORLD_NSE_AUTHORIZED: "false"
+      SH_WORLD_BSE_AUTHORIZED: "false"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -71,6 +71,21 @@ jobs:
         run: pytest -m "not live" -q tests/test_world.py -k "archive"
       - name: Rejeu historique — tests synthétiques hors réseau
         run: pytest -m "not live" -q tests/test_world.py -k "replay"
+      - name: Import d'historiques (mode recherche) — fichier d'EXEMPLE synthétique, aucune connexion Yahoo
+        run: |
+          mkdir -p var-verify/exemples
+          python - <<'EOF'
+          import numpy as np
+          from datetime import date
+          from stockhunter.world import markets as mk
+          ss = [s.session for s in mk.sessions(mk.get("XETR"), date(2025, 6, 1), date(2026, 11, 13))]
+          c = 50 * np.cumprod(1 + np.random.default_rng(1).normal(0.0005, 0.01, len(ss)))
+          rows = ["Date,Open,High,Low,Close,Adj Close,Volume"] + [f"{d},{x*.998:.3f},{x*1.01:.3f},{x*.99:.3f},{x:.3f},{x:.3f},300000" for d, x in zip(ss, c)]
+          open("var-verify/exemples/ZZEXEMPLE.DE.csv", "w").write("\n".join(rows))
+          EOF
+          stockhunter world import var-verify/exemples/ZZEXEMPLE.DE.csv --source exemple --rights "fichier synthétique de vérification, aucun droit tiers"
+          stockhunter world sources
+          stockhunter world ranking --top 5 --mode recherche
       - name: Classement mondial, portefeuille, état
         # base jetable : rien n'est écrit en production ; une erreur ici rend le job rouge (pas de masquage)
         run: |
