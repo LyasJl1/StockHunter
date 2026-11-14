@@ -43,6 +43,7 @@ class Market:
     note: str = ""
     lot_size: int = 1              # quotité de négociation par défaut (surchargée par titre si la source la donne)
     priority: int = 9              # départage du listing principal d'un même ISIN (petit = prioritaire)
+    open_local: time | None = None # ouverture habituelle (repli) ; None = 9 h locales
 
     @property
     def continent(self) -> str:
@@ -58,7 +59,8 @@ MARKETS: dict[str, Market] = {m.code: m for m in [
     # ------------------------------------------------------------------ Amérique du Nord
     Market("US", "États-Unis (NYSE, Nasdaq, NYSE American)", "US", "États-Unis", "Amérique du Nord",
            ("XNYS", "XNAS", "XASE"), "XNYS", "America/New_York", "USD", time(16, 0), 180, PRICES, ("massive", "tiingo"),
-           "Massive (barres de tout le marché, radiés compris, 2 ans) ; Tiingo pour l'univers suivi.", priority=1),
+           "Massive (barres de tout le marché, radiés compris, 2 ans) ; Tiingo pour l'univers suivi.", priority=1,
+           open_local=time(9, 30)),
     Market("XTSE", "Toronto Stock Exchange", "CA", "Canada", "Amérique du Nord", ("XTSE",), "XTSE", "America/Toronto",
            "CAD", time(16, 0), 120, NONE, (), "Aucune source gratuite de cours de tout le marché identifiée."),
     # ------------------------------------------------------------------ Europe
@@ -103,10 +105,10 @@ MARKETS: dict[str, Market] = {m.code: m for m in [
            "sans archive longue) : source identifiée, non intégrée à ce stade."),
     Market("XNSE", "National Stock Exchange of India", "IN", "Inde", "Asie-Pacifique", ("XNSE",), "XBOM",
            "Asia/Kolkata", "INR", time(15, 30), 180, PRICES, ("nse",), INDIA_NOTE + " Calendrier BSE (mêmes fériés).",
-           priority=3),
+           priority=3, open_local=time(9, 15)),
     Market("XBOM", "BSE (Bombay Stock Exchange)", "IN", "Inde", "Asie-Pacifique", ("XBOM",), "XBOM", "Asia/Kolkata",
            "INR", time(15, 30), 180, PRICES, ("bse",), INDIA_NOTE + " Titres déjà cotés au NSE : listing secondaire.",
-           priority=4),
+           priority=4, open_local=time(9, 15)),
     Market("XKRX", "Korea Exchange", "KR", "Corée du Sud", "Asie-Pacifique", ("XKRX",), "XKRX", "Asia/Seoul", "KRW",
            time(15, 30), 120, NONE, (), "Aucune source gratuite fiable identifiée."),
     Market("XASX", "Australian Securities Exchange", "AU", "Australie", "Asie-Pacifique", ("XASX",), "XASX",
@@ -157,6 +159,7 @@ class SessionInfo:
     session: date
     close_utc: datetime
     source: str                     # « exchange_calendars » | « jours ouvrés (calendrier non disponible) »
+    open_utc: datetime | None = None
 
 
 def sessions(m: Market, start: date, end: date) -> list[SessionInfo]:
@@ -173,14 +176,16 @@ def sessions(m: Market, start: date, end: date) -> list[SessionInfo]:
         a, b = max(start, cal_start), min(end, cal_end)
         if a <= b:
             idx = cal.sessions_in_range(pd.Timestamp(a), pd.Timestamp(b))
-            closes = cal.closes.loc[idx]
-            out += [SessionInfo(s.date(), c.to_pydatetime().astimezone(timezone.utc), "exchange_calendars")
-                    for s, c in zip(idx, closes)]
+            closes, opens = cal.closes.loc[idx], cal.opens.loc[idx]
+            out += [SessionInfo(s.date(), c.to_pydatetime().astimezone(timezone.utc), "exchange_calendars",
+                                o.to_pydatetime().astimezone(timezone.utc))
+                    for s, c, o in zip(idx, closes, opens)]
     fb_start = start if cal is None else max(start, cal_end + timedelta(days=1))
     for d in pd.bdate_range(fb_start, end) if fb_start <= end else []:
         d = d.date()
         close = datetime.combine(d, m.close_local, tz).astimezone(timezone.utc)
-        out.append(SessionInfo(d, close, "jours ouvrés (calendrier non disponible : fériés inconnus)"))
+        opn = datetime.combine(d, m.open_local or time(9, 0), tz).astimezone(timezone.utc)
+        out.append(SessionInfo(d, close, "jours ouvrés (calendrier non disponible : fériés inconnus)", opn))
     return out
 
 

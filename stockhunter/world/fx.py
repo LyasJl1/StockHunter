@@ -14,12 +14,27 @@ Conventions (docs/v3-2/conventions.md) :
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
 BASES = ("EUR", "USD")
+ECB_PUBLICATION = time(16, 0)            # heure de publication des taux de référence (Francfort)
+ECB_TZ = ZoneInfo("Europe/Berlin")
+
+
+def ecb_published_at(d: date) -> datetime:
+    """Instant (UTC) à partir duquel le taux BCE daté `d` est connu : 16 h à Francfort (heure d'été comprise)."""
+    return datetime.combine(d, ECB_PUBLICATION, ECB_TZ).astimezone(timezone.utc)
+
+
+def ecb_known_date(t: datetime) -> date:
+    """Date du dernier taux BCE PUBLIÉ à l'instant t (UTC) : le taux du jour n'est connu qu'après 16 h CET."""
+    t = t.astimezone(timezone.utc)
+    d = t.astimezone(ECB_TZ).date()
+    return d if ecb_published_at(d) <= t else d - timedelta(days=1)
 
 
 class FxUnavailable(KeyError):
@@ -65,6 +80,10 @@ class FxTable:
         if ccy == base:
             return 1.0
         return self.per_eur(base, d) / self.per_eur(ccy, d)
+
+    def known_rate(self, ccy: str, base: str, t: datetime) -> float:
+        """Valeur en `base` d'une unité de `ccy` avec les seuls taux PUBLIÉS à l'instant t (UTC)."""
+        return self.rate(ccy, base, ecb_known_date(t))
 
     def series(self, ccy: str, base: str, dates: pd.DatetimeIndex) -> pd.Series:
         """Valeur en `base` d'une unité de `ccy` pour chaque date (dernier taux ≤ date ; NaN avant le premier)."""

@@ -472,3 +472,22 @@ def test_bse_scan_excludes_companies_listed_on_nse(store):
     synth_market(store, "XBOM", 30, 10, turnover_scale=5e9, isin_market="XNSE")   # mêmes ISIN : doublons
     p, info = ws.build_market_panel(store, "XBOM", fx)
     assert info["exclus_listing_principal"] == 10 and (p is None or p.close.shape[1] == 0)
+
+
+def test_replay_future_discontinuity_does_not_change_past_signals(tmp_path):
+    """3.2.1 : une discontinuité FUTURE ne tronque plus l'historique d'une date de signal passée (look-ahead 3.2)."""
+    from stockhunter.world import replay as rp
+    fx = fx_table(date(2025, 1, 1), D)
+    sigs = []
+    for k, jump in enumerate((False, True)):
+        st = WorldStore(tmp_path / f"w{k}")
+        ss = synth_market(st, "XPAR", 200, 30, trend_first=10)
+        if jump:
+            for d in ss[-8:]:
+                df = pd.read_parquet(st.path("XPAR", d))
+                df.loc[df["ticker"].isin(["ZZ00", "ZZ01", "ZZ02"]), ["open", "high", "low", "close"]] *= 3
+                df.to_parquet(st.path("XPAR", d), index=False)
+        res = rp.replay(st, "XPAR", fx)
+        cutoff = ss[-40]
+        sigs.append(sorted((s.as_of, s.key, s.category) for s in res["signaux"] if s.as_of <= cutoff))
+    assert sigs[0] == sigs[1] and sigs[0]

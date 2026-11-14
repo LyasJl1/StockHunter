@@ -28,32 +28,42 @@ PROTOCOL = "docs/research/2026-11-14-preenregistrement-international.md"
 
 
 def replay(store: WorldStore, code: str, fx: FxTable) -> dict[str, Any]:
-    p, info = ws.build_market_panel(store, code, fx)
-    if p is None or len(p.close) < ws.MIN_SESSIONS + HORIZON + 1:
+    """3.2.1 : à chaque date de signal, panel reconstruit avec les SEULES séances ≤ date (troncature des
+    discontinuités, univers, seuils de change connus à cette date) ; rendements futurs mesurés sur le panel complet
+    non tronqué (une forte hausse future n'est plus écartée de la mesure)."""
+    full, info = ws.build_market_panel(store, code, fx, truncate=False)
+    if full is None or len(full.close) < ws.MIN_SESSIONS + HORIZON + 1:
         return {"place": code, "statut": "NON TESTABLE", "motif": f"{info.get('seances', 0)} séances stockées",
                 "categories": {}, "signaux": []}
     m = mk.get(code)
-    filt = ws.market_filter(code, fx, p.close.index[-1])
-    fw = forward_returns(p, HORIZON)
-    mask = universe_mask(p, filt)
-    n = len(p.close)
-    idx = [i for i in range(ws.MIN_SESSIONS - 1, n - HORIZON - 1, STEP) if mask.iloc[i].sum() >= 20]
-    rows, signals = [], []
+    fw = forward_returns(full, HORIZON)
+    n = len(full.close)
+    rows, signals, idx = [], [], []
     names = info.get("noms") or {}
-    for i in idx:
-        d = p.close.index[i]
-        res = disc.run(p.truncate(d), {}, filt, ccy=m.currency, bench_label=f"équipondéré {code}")
-        univ = fw.iloc[i][mask.iloc[i]].mean()
+    for i in range(ws.MIN_SESSIONS - 1, n - HORIZON - 1, STEP):
+        d = full.close.index[i]
+        pit, _ = ws.build_market_panel(store, code, fx, end=d.date())
+        filt = ws.market_filter(code, fx, d)
+        mask_d = universe_mask(pit, filt).iloc[-1]
+        if mask_d.sum() < 20:
+            continue
+        idx.append(i)
+        res = disc.run(pit, {}, filt, ccy=m.currency, bench_label=f"équipondéré {code}")
+        univ = fw.loc[d].reindex(mask_d[mask_d].index).mean()
         for key, cat in res["categories"].items():
             picks = [c["ticker"] for c in cat["candidats"]]
-            r = fw.iloc[i][picks].dropna() if picks else pd.Series(dtype=float)
+            r = fw.loc[d].reindex(picks).dropna() if picks else pd.Series(dtype=float)
             rows.append({"date": d, "categorie": key, "n": len(r),
                          "exces_net": float(r.mean() - univ - COST_ROUND_TRIP) if len(r) and np.isfinite(univ) else np.nan})
             for c in cat["candidats"]:
-                signals.append(SignalIn(code, c["ticker"], names.get(c["ticker"], (c["ticker"],))[0], d.date(), key,
-                                        round(1 - (c["rank"] - 1) / max(cat["admis"], 1), 4),
-                                        float(p.close.at[d, c["ticker"]]), float(c["plan"]["atr"] *
-                                        p.close.at[d, c["ticker"]] / c["plan"]["signal_close"]), m.currency, m.country))
+                t = c["ticker"]
+                adj = float(full.close.at[d, t]) if t in full.close.columns else np.nan
+                if not np.isfinite(adj) or not c["plan"]["signal_close"]:
+                    continue
+                signals.append(SignalIn(code, t, names.get(t, (t,))[0], d.date(), key,
+                                        round(1 - (c["rank"] - 1) / max(cat["admis"], 1), 4), adj,
+                                        float(c["plan"]["atr"] * adj / c["plan"]["signal_close"]), m.currency, m.country))
+    p = full
     df = pd.DataFrame(rows)
     cats = {}
     for key in disc.CATEGORIES:
@@ -95,6 +105,14 @@ def register(results: list[dict], meta: dict, reg_path=None) -> dict:
                      "periode": "hors échantillon (règles jamais développées sur cette place)",
                      "dates": c["dates"], "stat": c["exces_net_moyen"], "t": c["t"], "decision": c["decision"],
                      "holdout_consulte": False}
+            prev = [e for e in reg["experiences"] if e.get("id") == eid]
+            if prev:                     # réexécution (correction de code) : l'ancien résultat est conservé, jamais effacé
+                old = {k: v for k, v in prev[0].items() if k not in ("historique",)}
+                if (old.get("stat"), old.get("t"), old.get("code")) != (entry["stat"], entry["t"], entry["code"]):
+                    entry["historique"] = prev[0].get("historique", []) + [old]
+                else:
+                    entry["historique"] = prev[0].get("historique", [])
+                entry["motif_reexecution"] = meta.get("motif")
             reg["experiences"] = [e for e in reg["experiences"] if e.get("id") != eid] + [entry]
     reg["executions"].append({"programme": "3.2-international", "date": meta["date"], "commit": meta.get("commit"),
                               "workflow_run": meta.get("workflow_run"), "tests": ids,
