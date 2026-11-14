@@ -1,0 +1,44 @@
+name: Sondage des sources mondiales
+
+# Vérifie, en LECTURE SEULE et avec un seul appel par URL, l'accessibilité de sources de données mondiales
+# gratuites (statut HTTP, type, taille, premières lignes). Aucune donnée n'est conservée ni publiée.
+on:
+  workflow_dispatch:
+  push:
+    branches: [stockhunter-v3-2]
+    paths: ["docs/ops/probes/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 15
+    env:
+      SH_TIINGO_API_KEY: ${{ secrets.SH_TIINGO_API_KEY }}
+      SH_STOOQ_API_KEY: ${{ secrets.SH_STOOQ_API_KEY }}
+    steps:
+      - name: Sondage
+        run: |
+          UA="StockHunter-research/1.0 (personal, non-commercial)"
+          probe() {
+            name="$1"; url="$2"
+            code=$(curl -sS -L -A "$UA" -o body -w "%{http_code} %{content_type} %{size_download}" --max-time 60 "$url" || echo "ERR")
+            echo "### $name"; echo "$code"
+            (file body; head -c 400 body | tr -c '[:print:]\n' '.'; echo) 2>/dev/null | head -8
+          }
+          probe "stooq csv sans cle (SAP.DE)" "https://stooq.com/q/d/l/?s=sap.de&i=d"
+          [ -n "$SH_STOOQ_API_KEY" ] && probe "stooq csv avec cle (SAP.DE)" "https://stooq.com/q/d/l/?s=sap.de&i=d&apikey=$SH_STOOQ_API_KEY" || echo "### stooq : pas de cle SH_STOOQ_API_KEY"
+          probe "stooq bulk (page)" "https://stooq.com/db/h/"
+          probe "ECB taux de change (USD, 5 obs.)" "https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A?lastNObservations=5&format=csvdata"
+          probe "Xetra instruments negociables" "https://www.xetra.com/resource/blob/1528/28b4d3e5e7b6d1a5c6d3a5c9e0e1c7a2/data/t7-xetr-allTradableInstruments.csv"
+          probe "Euronext liste actions" "https://live.euronext.com/en/pd_es/data/stocks/download?mics=dm_all_stock"
+          probe "JPX liste des emetteurs" "https://www.jpx.co.jp/english/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_e.xls"
+          probe "NSE liste actions" "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
+          probe "Tiingo tickers supportes" "https://apimedia.tiingo.com/docs/tiingo/daily/supported_tickers.zip"
+          if [ -s body ] && file body | grep -q Zip; then unzip -p body | python3 -c "
+          import csv,sys,collections
+          r=csv.DictReader(sys.stdin); c=collections.Counter((x['exchange'],x['assetType']) for x in r)
+          print('Tiingo bourses x types :', c.most_common(25))"; fi
