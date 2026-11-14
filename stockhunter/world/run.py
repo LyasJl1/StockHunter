@@ -17,7 +17,7 @@ import pandas as pd
 from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 
-from stockhunter.db.models import (DiscoveryCandidate, KeyValue, WorldListing, WorldOutcome, WorldScan,
+from stockhunter.db.models import (DiscoveryCandidate, KeyValue, WorldListing, WorldScan,
                                    WorldSignal)
 from stockhunter.db.session import session_scope
 from stockhunter.world import markets as mk

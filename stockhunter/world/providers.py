@@ -133,7 +133,7 @@ class Fetcher:
                 err = SourceUnavailable(f"erreur réseau : {type(exc).__name__}")
             else:
                 if status == 404:
-                    raise NoSession(f"404 : fichier absent chez la source")
+                    raise NoSession("404 : fichier absent chez la source")
                 if status < 400:
                     head = body[:200].lstrip().lower()
                     if expect != "html" and (head.startswith(b"<!doctype html") or head.startswith(b"<html")):

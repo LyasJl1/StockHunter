@@ -21,7 +21,6 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import date
 
 from sqlalchemy import func, select
 from sqlalchemy.engine import Engine

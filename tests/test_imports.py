@@ -14,7 +14,6 @@ from stockhunter.world import imports as im
 from stockhunter.world import markets as mk
 from stockhunter.world import ranking as rk
 from stockhunter.world import run as wr
-from stockhunter.world import scan as ws
 from stockhunter.world.store import WorldStore
 from tests.world_fixtures import fx_table
 

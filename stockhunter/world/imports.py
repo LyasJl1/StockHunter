@@ -24,7 +24,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
-import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -118,7 +117,7 @@ def parse_symbol(symbol: str) -> tuple[str, str, str, float]:
     m = re.fullmatch(r"([A-Z0-9&\-]+)(?:\.([A-Z]{1,2}))?", s)
     if not m:
         raise ImportError_(f"{symbol} : symbole Yahoo illisible")
-    base, suf = m.group(1), m.group(2) or ""
+    suf = m.group(2) or ""
     if suf not in YAHOO_SUFFIX:
         raise ImportError_(f"{symbol} : suffixe « .{suf} » non reconnu (place inconnue du registre)")
     market, ccy, div = YAHOO_SUFFIX[suf]

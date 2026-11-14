@@ -191,7 +191,6 @@ def simulate(signals: list[SignalIn], bars: dict[tuple[str, str], pd.DataFrame],
         events.append((datetime.combine(d, time(23, 59, 59), timezone.utc), VALUATION, "", d))
     events.sort(key=lambda e: (e[0], e[1], e[2], e[3]))
 
-    known_of: dict[int, datetime] = {}
     sig_close_t = {}
     for s in signals:
         if s.market not in sessions_of and (s.market, s.key) not in prices:
