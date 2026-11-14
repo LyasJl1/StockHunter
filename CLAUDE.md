@@ -119,6 +119,8 @@ pytest -m live                      # tests réels (clés requises)
   ajouter un cas aux tests de perturbation (`tests/test_world_portfolio.py`).
 - Euronext : collecte automatique interdite par les conditions d'euronext.com sans autorisation écrite ; désactivée
   (`SH_WORLD_EURONEXT_ENABLED`). Archive durable des séances non reconstituables : table `world_archive`.
+- 3.3 : Yahoo = import de fichiers seulement (`world/imports.py`), JAMAIS de collecte automatique ni de yfinance ;
+  tout import exige une déclaration de droits ; places importées = mode recherche (jamais présentées à jour).
 - Ajouter une place : `docs/v3-2/sources.md` (« Ajouter une place »). Conventions : `docs/v3-2/conventions.md`.
 
 ## Règles de recherche (v3)

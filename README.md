@@ -17,6 +17,11 @@ Fonctions : scanner multi-catégories par place, classement mondial dédupliqué
 sélection avec des règles de trading uniques, paper trading US, portefeuille mondial simulé (EUR / USD),
 laboratoire de recherche pré-enregistré, tableau de bord web (Railway), Telegram.
 
+## 3.3 — import d'historiques (mode recherche)
+Yahoo Finance interdit la collecte automatique (conditions §2(d)(ix)) : StockHunter ne s'y connecte pas. Les fichiers
+obtenus légitimement (export Yahoo Finance Gold, courtier, autre source autorisée) s'importent avec
+`stockhunter world import fichiers… --source … --rights "…"` puis sont scannés en mode recherche. Voir `docs/v3-3/`.
+
 ## Documentation
 - `CLAUDE.md` — règles non négociables et architecture.
 - `docs/v3/` — StockHunter 3.0 / 3.1 (audit, architecture, mise en production, rapports).
