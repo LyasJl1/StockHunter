@@ -1,3 +1,5 @@
+> **Mise à jour du 14/11/2026 :** NSE et BSE sont désormais suspendues par défaut dans cette PR (collecte, scanner et sélection pour portefeuille), dans l'attente des droits applicables. Leurs anciens résultats chiffrés demeurent des résultats historiques de vérification et ne prouvent plus une source active. Voir `docs/v3-2-1/inde-droits.md`. Le dashboard gère aussi les portefeuilles vides sans frais.
+
 # Rapport StockHunter 3.2.1 — correction critique, fiabilisation, validation (14/11/2026)
 
 Branche `stockhunter-v3-2-1-fixes`, **non fusionnée**. Niveaux de preuve utilisés ci-dessous :

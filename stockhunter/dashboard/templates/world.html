@@ -35,14 +35,12 @@
   <select name="category"><option value="">Toutes catégories</option>{% for k, c in v.categories.items() %}<option value="{{ k }}" {{ 'selected' if f.category == k }}>{{ c.label }}</option>{% endfor %}</select>
   <select name="tier"><option value="">Toutes tailles (proxy : liquidité)</option>{% for t, l in [('grande', 'Grandes / très liquides'), ('moyenne', 'Moyennes'), ('petite', 'Petites')] %}<option value="{{ t }}" {{ 'selected' if f.tier == t }}>{{ l }}</option>{% endfor %}</select>
   <select name="top">{% for n in v.top_choices %}<option value="{{ n }}" {{ 'selected' if v.top == n }}>{{ 'Toutes' if n == 0 else n }}</option>{% endfor %}</select>
-  <select name="risk"><option value="">Tous risques</option>{% for r in ('modéré', 'élevé', 'très élevé') %}<option {{ 'selected' if f.risk == r }}>{{ r }}</option>{% endfor %}</select>
-  <select name="mode"><option value="surveillance" {{ 'selected' if v.mode == 'surveillance' }}>Surveillance (données à jour)</option><option value="recherche" {{ 'selected' if v.mode == 'recherche' }}>Recherche (dernière séance connue, imports)</option></select>
   <button>Filtrer</button>
 </form>
 <div class="card" style="overflow-x:auto"><p class="sub">{{ v.rank.total }} sélections distinctes (sociétés dédupliquées), {{ v.rank.apres_filtres }} après filtres. Secteur : N/D hors États-Unis (aucune source gratuite). {{ v.rank.avertissement }}</p>
 <table><tr><th class="r">Rang</th><th>Action</th><th>Pays</th><th>Bourse</th><th>Devise</th><th>Catégories</th><th class="r">Clôture locale</th><th class="r">≈ EUR</th><th class="r">≈ USD</th><th>Séance</th><th class="r">Score</th><th>Risque</th></tr>
 {% for r in v.rank.lignes %}<tr><td class="r">{{ r.rank }}</td>
-<td>{% if r.market == 'US' %}<a href="/discover/{{ r.ticker }}">{{ r.ticker }}</a>{% else %}{{ r.ticker }}{% endif %} <span class="muted">{{ (r.name or '')[:32] }}</span>{% if r.instrument != 'action' %} <span class="muted">({{ r.instrument }})</span>{% endif %}{% if r.also_listed %}<br><span class="sub">aussi : {{ r.also_listed|join(', ') }}</span>{% endif %}{% if r.reasons %}<br><span class="sub">{{ r.reasons|join(' · ') }}</span>{% endif %}{% if r.perime %}<br><span class="sub neg">données non à jour : {{ r.perime }}</span>{% endif %}{% if r.key.startswith('YF:') %}<br><span class="sub">identifiant : symbole Yahoo importé (ISIN inconnu, doublons inter-places non résolus)</span>{% endif %}</td>
+<td>{% if r.market == 'US' %}<a href="/discover/{{ r.ticker }}">{{ r.ticker }}</a>{% else %}{{ r.ticker }}{% endif %} <span class="muted">{{ (r.name or '')[:32] }}</span>{% if r.instrument != 'action' %} <span class="muted">({{ r.instrument }})</span>{% endif %}{% if r.also_listed %}<br><span class="sub">aussi : {{ r.also_listed|join(', ') }}</span>{% endif %}</td>
 <td>{{ r.country }}</td><td>{{ r.exchange }}</td><td>{{ r.currency }}</td>
 <td>{% for c in r.categories %}{{ v.categories[c].label }}{{ ', ' if not loop.last }}{% endfor %}</td>
 <td class="r">{{ r.close|num(2) }}</td><td class="r">{{ r.close_eur|num(2) }}</td><td class="r">{{ r.close_usd|num(2) }}</td>
@@ -52,12 +50,12 @@
 
 <h2 style="margin-top:18px">Portefeuille mondial simulé</h2>
 <div class="tabs" style="margin-bottom:10px">{% for b in ('EUR', 'USD') %}<a class="{{ 'on' if base == b }}" href="/world?base={{ b }}">Devise de base {{ b }}</a>{% endfor %}</div>
-{% if p and p.resume %}{% set s = p.resume %}
+{% if p and p.resume %}{% set s = p.resume %}{% set fees = s.frais if s.frais is defined else {"courtage": 0.0, "change": 0.0} %}
 <div class="grid g4" style="margin-bottom:12px">
   <div class="card"><h2>Valeur ({{ base }})</h2><div class="kpi">{{ s.valeur_finale|num(0) }}</div><div class="sub">capital initial {{ s.capital_initial|num(0) }} · {{ s.debut }} → {{ s.fin }}</div></div>
   <div class="card"><h2>Rendement total</h2><div class="kpi {{ 'pos' if (s.rendement_total or 0) > 0 else 'neg' }}">{{ s.rendement_total|pct }}</div><div class="sub">drawdown max {{ s.drawdown_max|pct }} · {{ s.nature }}</div></div>
   <div class="card"><h2>Trades</h2><div class="kpi">{{ s.trades_clos }}</div><div class="sub">{{ s.positions_ouvertes }} ouvertes · gagnants {{ s.gagnants|pct(0, false) }} · R moyen {{ s.r_moyen|num(2) }} · {{ s.lecture }}</div></div>
-  <div class="card"><h2>Frais ({{ base }})</h2><div class="kpi">{{ (s.frais.courtage + s.frais.change)|num(0) }}</div><div class="sub">courtage {{ s.frais.courtage|num(0) }} · change {{ s.frais.change|num(0) }} · {{ p.refus }} entrées refusées (plafonds)</div></div>
+  <div class="card"><h2>Frais ({{ base }})</h2><div class="kpi">{{ (fees.courtage + fees.change)|num(0) }}</div><div class="sub">courtage {{ fees.courtage|num(0) }} · change {{ fees.change|num(0) }} · {{ p.refus }} entrées refusées (plafonds)</div></div>
 </div>
 <div class="card"><canvas id="weq" height="70"></canvas>
 <table style="margin-top:10px"><tr><th>Référence (même période, même devise)</th><th class="r">Rendement</th></tr>
@@ -69,15 +67,6 @@
 <div class="card"><p>Stratégies validées : <b>{{ v.validation.valides|length or 'aucune' }}</b> (famille de {{ v.validation.tests_famille }} tests, seuil t ≥ 3,0 corrigé des tests multiples).</p>
 <table><tr><th>Test international pré-enregistré</th><th>Décision</th><th class="r">t</th></tr>{% for i, d, t in v.validation.international %}<tr><td>{{ i }}</td><td>{{ d }}</td><td class="r">{{ t|num(2) }}</td></tr>{% endfor %}</table>
 <p class="sub">Les sélections sont des pistes de recherche, pas des recommandations validées.</p></div>
-
-<h2 style="margin-top:18px">Données : sources et imports</h2>
-<div class="card" style="overflow-x:auto"><table><tr><th>Source</th><th>État</th><th>Mode</th><th>Motif / droits</th></tr>
-{% for st in v.sources %}<tr><td>{{ st.name }}</td><td class="{{ '' if st.enabled else 'neg' }}">{{ 'activée' if st.enabled else 'désactivée' }}</td><td>{{ st.mode }}</td><td class="sub">{{ st.reason }}</td></tr>{% endfor %}</table>
-<h3 style="margin-top:12px">Fichiers importés (mode recherche)</h3>
-{% if v.imports %}<table><tr><th>Fichier</th><th>Format</th><th>Source</th><th>Droits déclarés</th><th class="r">Lignes gardées</th><th>Symboles</th><th>Qualité</th><th>Importé le</th></tr>
-{% for x in v.imports|reverse %}<tr><td>{{ x.fichier }}</td><td>{{ x.format }}</td><td>{{ x.source }}</td><td class="sub">{{ x.droits }}</td><td class="r">{{ x.gardees }} / {{ x.lignes }}</td><td class="sub">{{ x.symboles[:6]|join(', ') }}{% if x.symboles|length > 6 %} (+{{ x.symboles|length - 6 }}){% endif %}</td><td class="sub">{% for k, n in x.qualite.items() %}{{ k }} : {{ n }}{{ ' · ' if not loop.last }}{% endfor %}</td><td>{{ x.importe_le }}</td></tr>{% endfor %}</table>
-{% else %}<p class="muted">Aucun fichier importé. Yahoo Finance : aucune collecte automatique (conditions §2(d)(ix)) ; import possible de fichiers obtenus légitimement : <code>stockhunter world import fichiers… --source yahoo-gold --rights "…"</code>.</p>{% endif %}
-</div>
 
 <h2 style="margin-top:18px">Santé par fournisseur</h2>
 <div class="card" style="overflow-x:auto"><table><tr><th>Fournisseur</th><th>Places</th><th>Capacités</th><th>État</th><th>Quota</th><th>Historique</th><th>Licence</th></tr>
