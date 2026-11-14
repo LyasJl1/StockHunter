@@ -206,7 +206,8 @@ def test_world_page_markets_scanner_portfolio(engine, settings, tmp_path):
     assert c.get("/world?top=999&base=XXX").status_code == 200                   # paramètres invalides : défauts
 
 
-def test_world_page_shows_failed_markets_backup_and_validation(engine, settings, tmp_path):
+def test_world_page_shows_failed_markets_backup_and_validation(engine, settings, tmp_path, monkeypatch):
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")  # source fictive pour tester le bandeau erreur
     from stockhunter.world import run as wr
     settings.world_dir = str(tmp_path / "world")
     wr._kv_set(engine, wr.KV_STATE, {"scanners": {"places": {"XNSE": {"statut": "ERREUR", "detail": "boom"}},

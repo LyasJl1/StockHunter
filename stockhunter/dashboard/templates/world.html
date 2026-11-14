@@ -50,12 +50,12 @@
 
 <h2 style="margin-top:18px">Portefeuille mondial simulé</h2>
 <div class="tabs" style="margin-bottom:10px">{% for b in ('EUR', 'USD') %}<a class="{{ 'on' if base == b }}" href="/world?base={{ b }}">Devise de base {{ b }}</a>{% endfor %}</div>
-{% if p and p.resume %}{% set s = p.resume %}
+{% if p and p.resume %}{% set s = p.resume %}{% set fees = s.frais if s.frais is defined else {"courtage": 0.0, "change": 0.0} %}
 <div class="grid g4" style="margin-bottom:12px">
   <div class="card"><h2>Valeur ({{ base }})</h2><div class="kpi">{{ s.valeur_finale|num(0) }}</div><div class="sub">capital initial {{ s.capital_initial|num(0) }} · {{ s.debut }} → {{ s.fin }}</div></div>
   <div class="card"><h2>Rendement total</h2><div class="kpi {{ 'pos' if (s.rendement_total or 0) > 0 else 'neg' }}">{{ s.rendement_total|pct }}</div><div class="sub">drawdown max {{ s.drawdown_max|pct }} · {{ s.nature }}</div></div>
   <div class="card"><h2>Trades</h2><div class="kpi">{{ s.trades_clos }}</div><div class="sub">{{ s.positions_ouvertes }} ouvertes · gagnants {{ s.gagnants|pct(0, false) }} · R moyen {{ s.r_moyen|num(2) }} · {{ s.lecture }}</div></div>
-  <div class="card"><h2>Frais ({{ base }})</h2><div class="kpi">{{ (s.frais.courtage + s.frais.change)|num(0) }}</div><div class="sub">courtage {{ s.frais.courtage|num(0) }} · change {{ s.frais.change|num(0) }} · {{ p.refus }} entrées refusées (plafonds)</div></div>
+  <div class="card"><h2>Frais ({{ base }})</h2><div class="kpi">{{ (fees.courtage + fees.change)|num(0) }}</div><div class="sub">courtage {{ fees.courtage|num(0) }} · change {{ fees.change|num(0) }} · {{ p.refus }} entrées refusées (plafonds)</div></div>
 </div>
 <div class="card"><canvas id="weq" height="70"></canvas>
 <table style="margin-top:10px"><tr><th>Référence (même période, même devise)</th><th class="r">Rendement</th></tr>
