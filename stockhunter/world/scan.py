@@ -117,6 +117,7 @@ def build_market_panel(store: WorldStore, code: str, fx: FxTable, max_sessions: 
     if dollar_vol.isna().all().all():
         dollar_vol = (frames["raw_close"] * frames["volume"]).mul(usd, axis=0)
     rets = frames["close"].pct_change(fill_method=None)
+    rets = rets.mask(rets.abs() > jump)              # variation inexpliquée exclue de l'indice (qualité, point-in-time)
     liquid = dollar_vol.rolling(20, min_periods=15).median() >= UniverseFilter().min_dollar_vol / 2
     ew = rets.where(liquid.shift(1, fill_value=False)).mean(axis=1).fillna(0.0)
     bench = (1 + ew).cumprod() * 100

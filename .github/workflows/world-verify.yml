@@ -72,7 +72,7 @@ jobs:
           diff -r var-verify/xnse-perdu var-verify/world/bars/XNSE && echo "RESTAURATION IDENTIQUE OCTET POUR OCTET"
           rm -rf var-verify/xnse-perdu
       - name: Réplication internationale pré-enregistrée (docs/research/2026-11-14-preenregistrement-international.md)
-        run: stockhunter world replay --markets XNSE
+        run: stockhunter world replay --markets XNSE --compare-legacy
       - name: Classement mondial, portefeuille, état
         # base jetable : rien n'est écrit en production ; une erreur ici rend le job rouge (pas de masquage)
         run: |
