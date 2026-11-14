@@ -32,6 +32,8 @@ jobs:
     env:
       SH_DATABASE_URL: sqlite:///var-verify/verify.db
       SH_WORLD_DIR: var-verify/world
+      SH_WORLD_NSE_AUTHORIZED: "false"
+      SH_WORLD_BSE_AUTHORIZED: "false"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -46,6 +48,8 @@ jobs:
           restore-keys: world-verify-
       - name: Tests hors réseau
         run: pytest -m "not live" -q tests/test_world.py
+      - name: Sécurité — NSE/BSE sans licence : aucun appel réseau
+        run: pytest -m "not live" -q tests/test_world.py -k "india_disabled_by_default_even_when_explicitly_requested or india_flags_are_separate"
       - name: Migrations (base jetable)
         run: mkdir -p var-verify && stockhunter init-db
       - name: Collecte BCE et places disposant de droits confirmés
