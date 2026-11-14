@@ -70,7 +70,7 @@ def test_import_requires_rights_and_never_reimports(istore, tmp_path):
         im.import_files(istore, [str(f)], "", "x")
     im.import_files(istore, [str(f)], RIGHTS, "x")
     rep = im.import_files(istore, [str(f)], RIGHTS, "x")
-    assert rep.refused and "déjà importé" in rep.refused[0] and rep.rows_added == 0
+    assert not rep.refused and "déjà importé" in rep.skipped[0] and rep.rows_added == 0   # reprise idempotente
 
 
 def test_london_pence_converted_and_first_import_is_never_overwritten(istore, tmp_path):

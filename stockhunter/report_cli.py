@@ -504,6 +504,8 @@ def cmd_world(settings, engine, args) -> int:
             print(f"  qualité : {k} : {v}")
         for r in rep.refused:
             print(f"  refusé : {r}")
+        for r in rep.skipped:
+            print(f"  ignoré : {r}")
         for sym, info in sorted(rep.quality.symbols.items())[:50]:
             print(f"  {sym:14} {info['place']:5} {info['devise']} {info['premiere']} → {info['derniere']} ({info['seances']} séances)")
         return 2 if rep.refused else 0

@@ -380,6 +380,7 @@ class ImportReport:
     conflicts: int = 0
     markets: dict[str, int] = field(default_factory=dict)
     refused: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)      # déjà importés (même empreinte) : reprise idempotente
 
 
 def import_files(store: ImportStore, paths: list[str], rights: str, source: str, engine=None,
@@ -397,7 +398,7 @@ def import_files(store: ImportStore, paths: list[str], rights: str, source: str,
             rep.refused.append(f"{Path(path).name} : {exc}")
             continue
         if pf.sha256 in known:
-            rep.refused.append(f"{Path(path).name} : déjà importé (même empreinte)")
+            rep.skipped.append(f"{Path(path).name} : déjà importé (même empreinte)")
             continue
         q = Quality()
         bars = normalize(pf.frame, q, today)
