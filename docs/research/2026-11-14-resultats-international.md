@@ -16,10 +16,17 @@ Lecture : aucune catégorie n'atteint le seuil t ≥ 3,0 ; aucune n'est donc « 
 (momentum, sortie de consolidation) ne sont pas statistiquement distinguables de zéro sur 7 mois et un seul
 régime. **Aucune stratégie n'est déclarée gagnante.**
 
-Portefeuille mondial simulé alimenté par ces sélections rejouées (descriptif, base EUR, 25/08/2025 → 13/11/2026,
-courbe démarrant au début du panel dans cette exécution) : −3,4 % (drawdown max −4,3 %), 33 trades clos, 36 %
-gagnants, R moyen −0,14, frais 476 € de courtage et 1 190 € de change ; indice équipondéré NSE sur la même période
-en EUR : +1,5 %. En USD : −3,5 % contre −4,1 % pour l'indice équipondéré. Descriptif, non validé.
+Portefeuille mondial simulé alimenté par ces sélections rejouées (descriptif ; run 43599040783, commit 045e0f5 ;
+05/03/2026 → 13/11/2026, même période et même devise pour la référence) :
+
+| Base | Portefeuille simulé | Indice équipondéré NSE (StockHunter) | Drawdown max | Trades clos | Gagnants | R moyen | Frais (courtage / change) | Entrées refusées |
+|---|---|---|---|---|---|---|---|---|
+| EUR | −3,4 % | +17,1 % | −4,3 % | 33 | 36 % | −0,14 | 476 / 1 190 € | 99 |
+| USD | −3,5 % | +11,4 % | −4,8 % | 33 | 36 % | −0,14 | 476 / 1 190 $ | 99 |
+
+Lecture : nettement sous la référence passive. Une seule place étant disponible sur la période, les plafonds
+(40 % par pays, 50 % par devise étrangère) limitent l'exposition et laissent l'essentiel en trésorerie : la
+comparaison mesure surtout cette contrainte et les frais de change. Descriptif, non validé, sans effet sur les règles.
 
 Écart au protocole relevé : le pré-enregistrement annonçait une famille de 22 tests (17 + 5) ; le registre
 comptait 16 tests (17 entrées dont une non-test) : la famille réelle est de **21**. Le seuil t ≥ 3,0, fixé

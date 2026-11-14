@@ -39,6 +39,8 @@ jobs:
       # Base de production (PostgreSQL Railway) si le secret existe, sinon SQLite du cache.
       SH_DATABASE_URL: ${{ secrets.SH_DATABASE_URL || 'sqlite:///var/stockhunter.db' }}
       SH_CACHE_DIR: var/cache
+      SH_WORLD_DIR: var/world        # 3.2 : historique mondial (Parquet) dans le cache Actions, jamais dans la base
+      SH_WORLD_MAX_FILES: ${{ vars.SH_WORLD_MAX_FILES || '40' }}
       SH_SEC_USER_AGENT: ${{ secrets.SH_SEC_USER_AGENT }}
       SH_TIINGO_API_KEY: ${{ secrets.SH_TIINGO_API_KEY }}
       SH_FRED_API_KEY: ${{ secrets.SH_FRED_API_KEY }}
