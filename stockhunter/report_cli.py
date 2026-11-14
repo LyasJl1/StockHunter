@@ -475,23 +475,48 @@ def cmd_world(settings, engine, args) -> int:
     from stockhunter.world import markets as wm
     from stockhunter.world import run as wr
     from stockhunter.world.store import WorldStore
-    store = WorldStore(settings.world_dir, settings.world_budget_mb)
+    from pathlib import Path as _Path
+    from stockhunter.world.imports import CombinedStore, ImportStore
+    primary = WorldStore(settings.world_dir, settings.world_budget_mb)
+    imports = ImportStore(_Path(settings.world_dir) / "imports", settings.world_budget_mb)
+    store = CombinedStore(primary, imports)          # collecte + imports (le scanner lit les deux)
     codes = tuple(c.strip().upper() for c in args.markets.split(",")) if args.markets else None
     if args.action == "markets":
         for m in wm.MARKETS.values():
             print(f"{m.code:5} {m.country} {m.region:16} {m.currency} {m.data:40} {m.name}")
         return 0
     if args.action == "sync":
-        return wr.collect(engine, store, backfill_sessions=args.backfill if args.backfill is not None
+        return wr.collect(engine, primary, backfill_sessions=args.backfill if args.backfill is not None
                           else settings.world_backfill_sessions,
                           max_files=args.max_files or settings.world_max_files, markets=codes)
     if args.action == "scan":
         return wr.scan_all(engine, store, codes)
+    if args.action == "import":                      # 3.3 : mode recherche, fichiers fournis par l'utilisateur
+        from stockhunter.world.imports import ImportError_, import_files
+        try:
+            rep = import_files(imports, args.files, args.rights or "", args.source, engine)
+        except ImportError_ as exc:
+            print(f"REFUS : {exc}")
+            return 1
+        print(f"Import : {len(rep.files)} fichier(s), {rep.rows_added} ligne(s) ajoutée(s), {rep.sessions_written} "
+              f"séance(s), conflits ignorés {rep.conflicts} ; par place : {rep.markets}")
+        for k, v in sorted(rep.quality.issues.items()):
+            print(f"  qualité : {k} : {v}")
+        for r in rep.refused:
+            print(f"  refusé : {r}")
+        for sym, info in sorted(rep.quality.symbols.items())[:50]:
+            print(f"  {sym:14} {info['place']:5} {info['devise']} {info['premiere']} → {info['derniere']} ({info['seances']} séances)")
+        return 2 if rep.refused else 0
+    if args.action == "sources":
+        from stockhunter.world.imports import sources_status
+        for st in sources_status():
+            print(f"{st.name:9} {'ACTIVÉE ' if st.enabled else 'DÉSACTIVÉE'} {st.mode:22} {st.reason}")
+        return 0
     if args.action in ("archive", "archive-verify", "restore"):
         from stockhunter.world import archive as wa
         mk_codes = codes or wa.NON_RECONSTRUCTIBLE
-        rep = (wa.push(engine, store, mk_codes, budget_mb=args.budget_mb) if args.action == "archive" else
-               wa.verify(engine, store, mk_codes) if args.action == "archive-verify" else wa.restore(engine, store, mk_codes))
+        rep = (wa.push(engine, primary, mk_codes, budget_mb=args.budget_mb) if args.action == "archive" else
+               wa.verify(engine, primary, mk_codes) if args.action == "archive-verify" else wa.restore(engine, primary, mk_codes))
         print(f"{args.action} : archivées {rep.archived}, déjà {rep.already}, restaurées {rep.restored}, vérifiées "
               f"{rep.verified}, divergences {len(rep.mismatches)}, absentes localement {len(rep.missing_local)}, "
               f"non archivées {len(rep.missing_archive)}, archive {rep.size_mb} Mo" + (f", REFUS : {rep.refused}" if rep.refused else ""))
@@ -510,8 +535,11 @@ def cmd_world(settings, engine, args) -> int:
         out = []
         for code in codes or ("XNSE",):
             res = rp.replay(store, code, fx)
+            res["biais_survivance_possible"] = code in wr.research_markets(store)
             print(f"Réplication {code} : {res['statut']} — {res.get('dates_signal', 0)} dates de signal "
-                  f"({res.get('premiere')} → {res.get('derniere')})")
+                  f"({res.get('premiere')} → {res.get('derniere')})"
+                  + (" — HISTORIQUE IMPORTÉ : biais de survivance possible, résultat de recherche seulement"
+                     if res["biais_survivance_possible"] else ""))
             for k, c in res["categories"].items():
                 t = "N/D" if c["t"] is None else f"{c['t']:+.2f}"
                 ex = "N/D" if c["exces_net_moyen"] is None else f"{c['exces_net_moyen'] * 100:+.2f} %"
@@ -561,7 +589,7 @@ def cmd_world(settings, engine, args) -> int:
     if args.action == "ranking":
         from stockhunter.world.fx import FxTable
         from stockhunter.world.ranking import global_ranking
-        res = global_ranking(engine, FxTable.from_long(store.load_fx()), top=args.top,
+        res = global_ranking(engine, FxTable.from_long(store.load_fx()), top=args.top, mode=args.mode,
                              region=args.region, country=args.country)
         print(f"Classement mondial : {res['total']} sélections distinctes ({res['apres_filtres']} après filtres)")
         print(f"{'Rang':>4}  {'Action':28} {'Pays':4} {'Bourse':26} {'Dev':3} {'Catégories':28} {'Score':>5} Risque")
@@ -711,7 +739,12 @@ def add_parsers(sub) -> dict:
     db.add_argument("--telegram-worker", action="store_true", help="répondre aux commandes Telegram en continu")
     wo = sub.add_parser("world", help="3.2 : marchés mondiaux (registre, collecte, scanners, classement, portefeuille)")
     wo.add_argument("action", choices=["markets", "sync", "scan", "ranking", "portfolio", "replay", "status",
-                                       "archive", "archive-verify", "restore"])
+                                       "archive", "archive-verify", "restore", "import", "sources"])
+    wo.add_argument("files", nargs="*", help="import : fichiers CSV / Parquet d'historique")
+    wo.add_argument("--rights", help="import : provenance et droit d'usage (obligatoire)")
+    wo.add_argument("--source", default="fichier", help="import : nom de la source (ex. yahoo-gold)")
+    wo.add_argument("--mode", default="surveillance", choices=["surveillance", "recherche"],
+                    help="ranking : surveillance (données à jour seulement) ou recherche (dernière séance connue)")
     wo.add_argument("--json", help="replay : fichier de résultats")
     wo.add_argument("--compare-legacy", action="store_true", help="replay : rejoue aussi avec le simulateur 3.2")
     wo.add_argument("--budget-mb", type=float, default=60.0, help="archive : budget de l'archive durable (Mo)")

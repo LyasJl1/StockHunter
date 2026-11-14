@@ -102,6 +102,8 @@ class Holding:
     last_close: float | None = None
     fx_fees: float = 0.0
     commissions: float = 0.0
+    cost_base: float = 0.0                 # décaissé à l'entrée (montant + courtage + change), devise de base
+    proceeds_base: float = 0.0             # encaissé aux sorties (net de courtage et de change)
 
 
 @dataclass
@@ -283,6 +285,7 @@ def simulate(signals: list[SignalIn], bars: dict[tuple[str, str], pd.DataFrame],
         gross, comm = amount * r, amount * rules.cost_bps / 1e4 * r
         fxf = gross * cfg.fx_cost_bps / 1e4 if h.sig.currency != cfg.base else 0.0
         cash += gross - comm - fxf
+        h.proceeds_base += gross - comm - fxf
         h.commissions += comm
         h.fx_fees += fxf
         fees["courtage"] += comm
@@ -358,6 +361,7 @@ def simulate(signals: list[SignalIn], bars: dict[tuple[str, str], pd.DataFrame],
                 comm = gross * rules.cost_bps / 1e4
                 fxf = gross * cfg.fx_cost_bps / 1e4 if h.sig.currency != cfg.base else 0.0
                 cash -= gross + comm + fxf
+                h.cost_base += gross + comm + fxf
                 h.commissions += comm
                 h.fx_fees += fxf
                 fees["courtage"] += comm
@@ -425,7 +429,9 @@ def _trade(h: Holding) -> dict:
     return {"ticker": h.sig.ticker, "place": h.sig.market, "pays": h.sig.country, "devise": h.sig.currency,
             "categorie": h.sig.category, "signal": str(h.sig.as_of), "entree": str(p.entry_date),
             "sortie": str(p.exit_date), "r": None if r is None else round(r, 3), "motif": p.close_reason,
-            "quantite": h.shares_decided, "frais_change_base": round(h.fx_fees, 2), "courtage_base": round(h.commissions, 2)}
+            "quantite": h.shares_decided, "frais_change_base": round(h.fx_fees, 2), "courtage_base": round(h.commissions, 2),
+            "pnl_base": round(h.proceeds_base - h.cost_base, 2),
+            "rendement": round(h.proceeds_base / h.cost_base - 1, 5) if h.cost_base else None}
 
 
 def _summary(eq: pd.Series, trades: list[dict], fees: dict, cfg: GlobalConfig, live, cash: float) -> dict[str, Any]:
@@ -436,7 +442,22 @@ def _summary(eq: pd.Series, trades: list[dict], fees: dict, cfg: GlobalConfig, l
     total = float(eq.iloc[-1] / cfg.capital - 1)
     dd = float((eq / eq.cummax() - 1).min())
     rs = [t["r"] for t in trades if t["r"] is not None]
-    return {"devise_base": cfg.base, "capital_initial": cfg.capital, "valeur_finale": round(float(eq.iloc[-1]), 2),
+    pnl = [t["pnl_base"] for t in trades]
+    gains, losses = sum(x for x in pnl if x > 0), -sum(x for x in pnl if x < 0)
+
+    def group(key):
+        out = {}
+        for t in trades:
+            g = out.setdefault(t[key], {"trades": 0, "pnl_base": 0.0, "gagnants": 0})
+            g["trades"] += 1
+            g["pnl_base"] = round(g["pnl_base"] + t["pnl_base"], 2)
+            g["gagnants"] += int(t["pnl_base"] > 0)
+        return out
+    return {"profit_factor": (gains / losses) if losses > 0 else None,
+            "rendement_moyen_par_trade": (sum(t["rendement"] for t in trades if t["rendement"] is not None) / len(trades))
+            if trades else None,
+            "par_strategie": group("categorie"), "par_pays": group("pays"),
+            "devise_base": cfg.base, "capital_initial": cfg.capital, "valeur_finale": round(float(eq.iloc[-1]), 2),
             "tresorerie_finale": round(cash, 2), "rendement_total": total,
             "annualise": (1 + total) ** (365 / days) - 1 if days >= 365 else None,
             "drawdown_max": dd, "volatilite_annuelle": float(ret.std() * math.sqrt(252)) if len(ret) > 20 else None,

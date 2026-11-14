@@ -57,6 +57,8 @@ class Row:
     instrument: str = "action"
     also_listed: list[str] = field(default_factory=list)
     rank: int = 0
+    reasons: list[str] = field(default_factory=list)     # pourquoi la sélection est retenue (fiche du moteur)
+    perime: str | None = None                            # mode recherche : retard de la donnée, affiché
 
 
 def risk_label(risk_pct: float, tier: str | None) -> str:
@@ -91,7 +93,7 @@ def _us_rows(engine: Engine, fx) -> list[Row]:
             except KeyError:
                 eur, usd = None, c.close
         adm = max(admitted.get(c.category, 0) or 0, c.rank)
-        rows.append(Row(key=f"US:{c.ticker}", ticker=c.ticker, name=c.name, market="US",
+        rows.append(Row(reasons=[str(x) for x in (card.get("pos") or [])][:3], key=f"US:{c.ticker}", ticker=c.ticker, name=c.name, market="US",
                         exchange=US_EXCHANGE.get(ex or "", ex or "US"), country="US", region=m.region,
                         continent=m.continent, currency="USD", as_of=str(as_of), close=c.close, close_eur=eur,
                         close_usd=usd, categories=[c.category], norm=round(1 - (c.rank - 1) / max(adm, 1), 4),
@@ -114,7 +116,7 @@ def _world_rows(engine: Engine) -> list[Row]:
                 sectors = dict(s.execute(select(WorldListing.isin, WorldListing.sector)).all())
             for g in sigs:
                 card = json.loads(g.card_json)
-                rows.append(Row(key=g.isin, ticker=g.ticker, name=g.name, market=market, exchange=m.name,
+                rows.append(Row(reasons=[str(x) for x in (card.get("pos") or [])][:3], key=g.isin, ticker=g.ticker, name=g.name, market=market, exchange=m.name,
                                 country=m.country, region=m.region, continent=m.continent, currency=g.currency,
                                 as_of=str(g.as_of), close=g.close, close_eur=g.close_eur, close_usd=g.close_usd,
                                 categories=[g.category], norm=g.norm_score, risk_pct=g.risk_pct,
@@ -135,6 +137,7 @@ def merge(rows: list[Row], links: dict[str, str] | None = None) -> list[Row]:
             x.categories = sorted(set(x.categories) | set(r.categories), key=list(CATEGORIES).index)
             x.norm = max(x.norm, r.norm)
             x.confidence = max(x.confidence, r.confidence)
+            x.reasons = list(dict.fromkeys(x.reasons + r.reasons))[:4]
         else:
             by_listing[k] = Row(**{**asdict(r), "categories": list(r.categories), "also_listed": []})
     by_company: dict[str, Row] = {}
@@ -161,17 +164,20 @@ def order(rows: list[Row]) -> list[Row]:
 
 def apply_filters(rows: list[Row], continent: str | None = None, region: str | None = None, country: str | None = None,
                   market: str | None = None, currency: str | None = None, sector: str | None = None,
-                  tier: str | None = None, category: str | None = None) -> list[Row]:
+                  tier: str | None = None, category: str | None = None, risk: str | None = None) -> list[Row]:
     def ok(r: Row) -> bool:
         return ((not continent or r.continent == continent) and (not region or r.region == region)
                 and (not country or r.country == country.upper()) and (not market or r.market == market)
                 and (not currency or r.currency == currency.upper()) and (not sector or (r.sector or "N/D") == sector)
-                and (not tier or (r.tier or "").startswith(tier)) and (not category or category in r.categories))
+                and (not tier or (r.tier or "").startswith(tier)) and (not category or category in r.categories)
+                and (not risk or r.risk == risk))
     return [r for r in rows if ok(r)]
 
 
 def global_ranking(engine: Engine, fx=None, top: int | None = 20, links: dict[str, str] | None = None,
-                   now=None, max_lag: int = 1, **filters) -> dict[str, Any]:
+                   now=None, max_lag: int = 1, mode: str = "surveillance", **filters) -> dict[str, Any]:
+    """`mode="surveillance"` : seules les places à jour (≤ `max_lag` séance de retard) entrent au classement ;
+    `mode="recherche"` : dernière séance connue de chaque place (historiques importés), retard affiché."""
     raw = _us_rows(engine, fx) + _world_rows(engine)
     # 3.2.1 : une place dont la dernière sélection a plus d'une séance de retard n'entre pas dans le classement
     stale, fresh_rows = {}, []
@@ -184,11 +190,15 @@ def global_ranking(engine: Engine, fx=None, top: int | None = 20, links: dict[st
                 stale[r.market] = f"fraîcheur inconnue : {exc}"
         if not stale[r.market]:
             fresh_rows.append(r)
+        elif mode == "recherche":
+            r.perime = stale[r.market]
+            fresh_rows.append(r)
     rows = order(merge(fresh_rows, links))
     filtered = apply_filters(rows, **filters)
     shown = filtered[:top] if top else filtered
     return {"total": len(rows), "apres_filtres": len(filtered), "lignes": shown,
             "seances": sorted({(r.market, r.as_of) for r in rows}),
-            "exclues_perimees": {k: v for k, v in stale.items() if v},
+            "exclues_perimees": {k: v for k, v in stale.items() if v} if mode == "surveillance" else {},
+            "mode": mode,
             "avertissement": "Le score est une position relative dans la place et la catégorie, pas une probabilité "
                              "de gain. Cours = clôtures de la séance indiquée, jamais des cours en direct."}

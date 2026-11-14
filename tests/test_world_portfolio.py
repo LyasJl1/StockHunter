@@ -236,3 +236,19 @@ def test_perturbations_detect_the_legacy_lookahead(engine_name):
         assert not same_close and not same_fx          # le look-ahead de 3.2 est bien détecté
     else:
         assert same_close and same_fx
+
+
+def test_performance_metrics_reconcile_with_cash():
+    sigs, bs = [], {}
+    for k in range(6):
+        df = bars("XPAR", 30.0 + k, seed=90 + k, vol=0.02)
+        bs[("XPAR", f"ZZ{k}")] = df
+        sigs.append(sig("XPAR", f"ZZ{k}", df, 5 + 3 * k, "EUR", "FR", norm=1 - k / 10, cat=("momentum", "steady")[k % 2]))
+    r = simulate(sigs, bs, fx(), GlobalConfig(max_country=1.0, max_corr=1.01))
+    s = r.summary
+    if s["positions_ouvertes"] == 0 and r.trades:
+        assert s["tresorerie_finale"] - 100_000.0 == pytest.approx(sum(t["pnl_base"] for t in r.trades), abs=0.05)
+    assert sum(g["trades"] for g in s["par_strategie"].values()) == len(r.trades) == sum(g["trades"] for g in s["par_pays"].values())
+    gains = sum(t["pnl_base"] for t in r.trades if t["pnl_base"] > 0)
+    losses = -sum(t["pnl_base"] for t in r.trades if t["pnl_base"] < 0)
+    assert s["profit_factor"] == (pytest.approx(gains / losses) if losses else None)

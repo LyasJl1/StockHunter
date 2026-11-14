@@ -182,6 +182,19 @@ def queue_alerts(engine: Engine, stage: str, places: dict[str, tuple[str, str]],
     return sent
 
 
+def research_markets(store) -> tuple[str, ...]:
+    """3.3 : places dont l'historique vient UNIQUEMENT d'imports (mode recherche) : scannées sur la dernière séance
+    connue, jamais présentées comme à jour, sans alerte de fraîcheur (elles ne sont pas censées s'actualiser)."""
+    imp = getattr(store, "imports", None)
+    if imp is None:
+        return ()
+    return tuple(c for c in mk.MARKETS if c != "US" and c not in SCANNED and imp.stored_sessions(c))
+
+
+def scannable(store) -> tuple[str, ...]:
+    return tuple(SCANNED) + research_markets(store)
+
+
 def stale_markets(engine: Engine, store: WorldStore, now: datetime | None = None, max_lag: int = 1) -> dict[str, str]:
     """Places dotées de cours dont les données ont plus de `max_lag` séance(s) de retard (place fermée : 0)."""
     out = {}
@@ -207,7 +220,8 @@ def scan_all(engine: Engine, store: WorldStore, markets: tuple[str, ...] | None 
     validation = registry_decisions()
     out, places = {}, {}
     stale = stale_markets(engine, store)
-    for code in markets or SCANNED:
+    research = set(research_markets(store))
+    for code in markets or scannable(store):
         try:
             res = ws.scan_market(engine, store, code, fx, validation)
             upd = ws.update_outcomes(engine, store, code, fx)
@@ -217,12 +231,25 @@ def scan_all(engine: Engine, store: WorldStore, markets: tuple[str, ...] | None 
             annotate("error", f"Scanner {code} — échec critique", out[code]["detail"])
             continue
         n = sum(len(c["candidats"]) for c in res.get("categories", {}).values())
+        if n and not res.get("deja_traitee") and code not in research and code not in stale:
+            try:                                          # nouvelles sélections : un message par place et par séance
+                from stockhunter.notifications.engine import enqueue
+                from stockhunter.world.telegram import opportunity_message
+                msg = opportunity_message(code, res)
+                if msg:
+                    enqueue(engine, "alert", f"world:signals:{code}:{res.get('as_of')}", msg)
+            except Exception as exc:
+                annotate("warning", f"Alerte Telegram {code}", f"{type(exc).__name__} : {exc}"[:200])
         out[code] = {"statut": res["statut"], "as_of": res.get("as_of"), "univers": res.get("univers", 0),
                      "selections": n, "seances": res.get("seances"), "suivi": upd, "conclusion": res["conclusion"],
                      "perime": stale.get(code)}
         if res["statut"] == "ERREUR_DONNEES":
             places[code] = (PARTIAL, res["conclusion"])
             annotate("warning", f"Scanner {code}", res["conclusion"])
+        elif code in research:                              # mode recherche : historique importé, non actualisé
+            out[code]["mode"] = "recherche (historique importé)"
+            places[code] = (NO_OPP if res["statut"] == "AUCUNE_OPPORTUNITE" else OK,
+                            f"mode recherche : données importées jusqu'au {res.get('as_of')} (non actualisées)")
         elif code in stale:
             places[code] = (PARTIAL, f"données périmées : {stale[code]}")
             annotate("warning", f"Scanner {code} — données périmées", stale[code])
@@ -339,6 +366,18 @@ def run_portfolio(engine: Engine, store: WorldStore, base: str = "EUR") -> int:
                "trades": res.trades[-50:], "refus": len(res.refused), "refus_exemples": res.refused[-10:],
                "signaux": len(sigs), "places": sorted({s.market for s in sigs})}
     _kv_set(engine, f"{KV_PORTFOLIO}_{base}", payload)
+    if base == "EUR":                                      # suivi Telegram des positions simulées, sans doublon
+        from datetime import timedelta as _td
+        from stockhunter.notifications.engine import enqueue
+        from stockhunter.world.telegram import opened_message, trade_message
+        recent = str((datetime.now(timezone.utc) - _td(days=4)).date())
+        for t in res.trades:
+            if t["sortie"] >= recent:
+                enqueue(engine, "alert", f"world:trade:{t['place']}:{t['ticker']}:{t['entree']}:{t['sortie']}",
+                        trade_message(t, base))
+        for x in res.decisions:
+            if x["decision"] == "entrée" and x["seance"] >= recent:
+                enqueue(engine, "alert", f"world:open:{x['place']}:{x['ticker']}:{x['seance']}", opened_message(x))
     sm = res.summary
     print(f"Portefeuille mondial simulé ({base}) : {len(sigs)} signaux, {sm.get('trades_clos', 0)} trades clos, "
           f"{sm.get('positions_ouvertes', 0)} positions ouvertes, valeur {sm.get('valeur_finale')} ; "
