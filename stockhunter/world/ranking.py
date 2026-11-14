@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -170,11 +171,24 @@ def apply_filters(rows: list[Row], continent: str | None = None, region: str | N
 
 
 def global_ranking(engine: Engine, fx=None, top: int | None = 20, links: dict[str, str] | None = None,
-                   **filters) -> dict[str, Any]:
-    rows = order(merge(_us_rows(engine, fx) + _world_rows(engine), links))
+                   now=None, max_lag: int = 1, **filters) -> dict[str, Any]:
+    raw = _us_rows(engine, fx) + _world_rows(engine)
+    # 3.2.1 : une place dont la dernière sélection a plus d'une séance de retard n'entre pas dans le classement
+    stale, fresh_rows = {}, []
+    for r in raw:
+        if r.market not in stale:
+            try:
+                f = mk.freshness(mk.get(r.market), date.fromisoformat(r.as_of), now)
+                stale[r.market] = f.detail if (f.lag or 0) > max_lag else None
+            except Exception as exc:
+                stale[r.market] = f"fraîcheur inconnue : {exc}"
+        if not stale[r.market]:
+            fresh_rows.append(r)
+    rows = order(merge(fresh_rows, links))
     filtered = apply_filters(rows, **filters)
     shown = filtered[:top] if top else filtered
     return {"total": len(rows), "apres_filtres": len(filtered), "lignes": shown,
             "seances": sorted({(r.market, r.as_of) for r in rows}),
+            "exclues_perimees": {k: v for k, v in stale.items() if v},
             "avertissement": "Le score est une position relative dans la place et la catégorie, pas une probabilité "
                              "de gain. Cours = clôtures de la séance indiquée, jamais des cours en direct."}

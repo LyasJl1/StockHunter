@@ -138,6 +138,19 @@ def market_filter(code: str, fx: FxTable, d) -> UniverseFilter:
 def scan_market(engine: Engine, store: WorldStore, code: str, fx: FxTable, validation: dict | None = None,
                 rules: Rules = Rules(), save: bool = True, end: date | None = None) -> dict[str, Any]:
     m = mk.get(code)
+    stored = store.stored_sessions(code)
+    if save and end is None and stored:                 # séance déjà traitée : pas de recalcul (reprise, 3.2.1)
+        with session_scope(engine) as s:
+            done = s.scalar(select(WorldScan).where(WorldScan.market == code, WorldScan.as_of == stored[-1],
+                                                    WorldScan.engine_version == WORLD_VERSION))
+            if done is not None:
+                ov = json.loads(done.overview_json)
+                cats = {k: {**v, "candidats": [json.loads(g.card_json) for g in s.scalars(
+                    select(WorldSignal).where(WorldSignal.scan_id == done.id, WorldSignal.category == k))]}
+                    for k, v in (ov.get("categories") or {}).items()}
+                return {"place": code, "version": WORLD_VERSION, "statut": done.status, "as_of": str(done.as_of),
+                        "univers": done.universe_size, "categories": cats, "conclusion": done.conclusion,
+                        "seances": ov.get("seances"), "deja_traitee": True}
     p, info = build_market_panel(store, code, fx, end=end)
     base = {"place": code, "version": WORLD_VERSION, **{k: v for k, v in info.items() if k != "noms"}}
     if p is None or len(p.close) < MIN_SESSIONS:

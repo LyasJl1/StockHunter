@@ -185,7 +185,11 @@ def test_world_page_markets_scanner_portfolio(engine, settings, tmp_path):
     fx = fx_table(_d(2025, 1, 1), _d(2026, 11, 13))
     st.save_fx(fx.wide.drop(columns="EUR").stack().rename("rate").reset_index()
                .rename(columns={"level_0": "date", "currency": "currency"}).assign(date=lambda x: x["date"].dt.date))
-    synth_market(st, "XPAR", 260, 40, trend_first=12)
+    from stockhunter.world import markets as wm
+    today = wm.last_completed_session(wm.get("XPAR"))          # données fraîches : le classement exclut les périmées
+    fx = fx_table(_d(2025, 1, 1), today)
+    st.save_fx(fx.wide.drop(columns="EUR").stack().rename("rate").reset_index().assign(date=lambda x: x["date"].dt.date))
+    synth_market(st, "XPAR", 260, 40, trend_first=12, end=today)
     res = ws.scan_market(engine, st, "XPAR", fx)
     assert wr.run_portfolio(engine, st, "EUR") == 0
     app = create_app(engine, settings, secret="s" * 48, password_hash=hash_password(PW), secure_cookies=False)
@@ -200,3 +204,21 @@ def test_world_page_markets_scanner_portfolio(engine, settings, tmp_path):
         assert picks[0] in page
         assert picks[0] not in c.get("/world?country=IN").text                    # filtre par pays
     assert c.get("/world?top=999&base=XXX").status_code == 200                   # paramètres invalides : défauts
+
+
+def test_world_page_shows_failed_markets_backup_and_validation(engine, settings, tmp_path):
+    from stockhunter.world import run as wr
+    settings.world_dir = str(tmp_path / "world")
+    wr._kv_set(engine, wr.KV_STATE, {"scanners": {"places": {"XNSE": {"statut": "ERREUR", "detail": "boom"}},
+                                                  "etats": {"XNSE": [wr.CRITICAL, "boom"]}},
+                                     "collecte": {"places": {"XPAR": {"statut": "échec", "critique": False,
+                                                                      "erreurs": ["HTTP 503"]}}},
+                                     "archive": {"at": "2026-11-14T23:30:00+00:00", "total_mo": 1.2, "places": {"XPAR": {}},
+                                                 "refus": None}})
+    app = create_app(engine, settings, secret="s" * 48, password_hash=hash_password(PW), secure_cookies=False)
+    c = TestClient(app)
+    login(c)
+    page = c.get("/world").text
+    assert "Places en échec ou dégradées" in page and "XNSE (échec critique" in page and "XPAR (partiel" in page
+    assert "Sauvegarde durable" in page and "1,2 Mo" in page or "1.2 Mo" in page
+    assert "Niveau de validation des stratégies" in page and "intl-XNSE-momentum" in page

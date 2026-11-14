@@ -39,6 +39,11 @@ class SourceUnavailable(RuntimeError):
     """Source inaccessible (réseau, protection anti-robot, format inattendu) : jamais contournée."""
 
 
+class DataCorrupted(SourceUnavailable):
+    """Fichier reçu mais inexploitable (format inattendu, date incohérente) : ÉCHEC CRITIQUE, pas une indisponibilité
+    temporaire. Rend la chaîne rouge (3.2.1)."""
+
+
 class NoSession(RuntimeError):
     """Le fichier de la séance n'existe pas chez la source (férié non prévu par le calendrier, retard)."""
 
@@ -184,7 +189,7 @@ def parse_euronext(body: bytes, session: date) -> tuple[pd.DataFrame, dict]:
     text = body.decode("utf-8-sig", errors="replace")
     lines = text.splitlines()
     if not lines or not lines[0].lstrip('"').startswith("Name"):
-        raise SourceUnavailable("format Euronext inattendu (en-tête absent)")
+        raise DataCorrupted("format Euronext inattendu (en-tête absent)")
     header = next(csv.reader([lines[0]], delimiter=";"))
     stamp = None
     for ln in lines[1:4]:
@@ -244,7 +249,7 @@ def parse_bhavcopy(body: bytes, session: date, market: str) -> tuple[pd.DataFram
     text = body.decode("utf-8-sig", errors="replace")
     rd = csv.DictReader(io.StringIO(text))
     if not rd.fieldnames or "TckrSymb" not in rd.fieldnames:
-        raise SourceUnavailable("format bhavcopy inattendu")
+        raise DataCorrupted("format bhavcopy inattendu")
     rows, other, wrong_date = [], 0, 0
     for r in rd:
         isin = (r.get("ISIN") or "").strip()
@@ -271,7 +276,7 @@ def parse_bhavcopy(body: bytes, session: date, market: str) -> tuple[pd.DataFram
                      "prev_close_adj": _num(r.get("PrvsClsgPric")), "lot_size": int(lot) if lot and lot >= 1 else 1,
                      "traded": traded})
     if wrong_date and not rows:
-        raise SourceUnavailable(f"fichier ne correspondant pas à la séance {session}")
+        raise DataCorrupted(f"fichier ne correspondant pas à la séance {session}")
     df = pd.DataFrame(rows, columns=BAR_COLUMNS)
     # un même symbole peut apparaître sous plusieurs séries (ex. EQ et BL) : on garde la ligne la plus échangée
     if len(df):
@@ -289,7 +294,7 @@ def parse_ecb(body: bytes) -> pd.DataFrame:
     """CSV BCE -> (date, currency, rate) ; rate = unités de devise pour 1 EUR, publié vers 16 h, heure de Francfort."""
     rd = csv.DictReader(io.StringIO(body.decode("utf-8-sig", errors="replace")))
     if not rd.fieldnames or "OBS_VALUE" not in rd.fieldnames:
-        raise SourceUnavailable("format BCE inattendu")
+        raise DataCorrupted("format BCE inattendu")
     rows = []
     for r in rd:
         v = _num(r.get("OBS_VALUE"))

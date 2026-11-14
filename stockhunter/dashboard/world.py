@@ -35,6 +35,13 @@ def world_view(engine: Engine, settings: Settings, f: dict) -> dict:
     port = {b: wr.kv_get(engine, f"{wr.KV_PORTFOLIO}_{b}") for b in ("EUR", "USD")}
     state = wr.kv_get(engine, wr.KV_STATE) or {}
     covered = [r for r in table if r["donnees"] == mk.PRICES]
+    active = [r for r in covered if (r.get("scanner") or {}).get("statut") in ("OK", "AUCUNE_OPPORTUNITE")]
+    from stockhunter.lab import registry as R
+    reg = R.load()
+    intl = [e for e in reg["experiences"] if e.get("programme") == "3.2-international"]
+    validation = {"tests_famille": len(R.tests(reg)),
+                  "valides": [e["id"] for e in reg["experiences"] if str(e.get("decision", "")).startswith(("VALID", "CONFIRM"))],
+                  "international": [(e["id"], e["decision"], e.get("t")) for e in intl]}
     storage = store.status()
     if not storage["places"] and (state.get("collecte") or {}).get("stockage"):
         storage = state["collecte"]["stockage"]          # tableau de bord hébergé : état consigné par la chaîne
@@ -44,7 +51,10 @@ def world_view(engine: Engine, settings: Settings, f: dict) -> dict:
             "countries": sorted({(m.country, m.country_name) for m in mk.MARKETS.values() if m.data == mk.PRICES}),
             "market_codes": [m.code for m in mk.with_prices()], "categories": CATEGORIES,
             "currencies": sorted({m.currency for m in mk.with_prices()}),
-            "fx_last": fx.last_date, "n_covered": len(covered),
+            "fx_last": fx.last_date, "n_covered": len(covered), "active": active,
+            "n_analysed": sum((r.get("scanner") or {}).get("univers") or 0 for r in active),
+            "failed": [r for r in table if r.get("etat") in (wr.CRITICAL, wr.PARTIAL)],
+            "archive": state.get("archive"), "validation": validation,
             "n_listings": sum((r["listings"] or {}).get("principal", 0) for r in covered)}
 
 

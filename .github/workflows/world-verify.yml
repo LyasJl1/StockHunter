@@ -1,4 +1,4 @@
-name: Monde — vérification réelle (branche 3.2)
+name: Monde — vérification réelle (branches 3.2.x)
 
 # Test RÉEL des places mondiales de la 3.2 sur une base SQLite jetable : collecte (BCE, Euronext, NSE, BSE),
 # stockage Parquet, référentiel, scanners, classement mondial, portefeuille simulé et rendu de la page Monde.
@@ -15,7 +15,7 @@ on:
         description: "fichiers au plus par place et par passage"
         default: "320"
   push:
-    branches: [stockhunter-v3-2]
+    branches: [stockhunter-v3-2, stockhunter-v3-2-1-fixes]
     paths: ["stockhunter/world/**", ".github/workflows/world-verify.yml"]
 
 permissions:
@@ -49,14 +49,20 @@ jobs:
       - name: Migrations (base jetable)
         run: mkdir -p var-verify && stockhunter init-db
       - name: Collecte réelle (BCE, Euronext, NSE, BSE)
-        id: sync
-        continue-on-error: true
+        # code 2 = dégradation temporaire (alerte visible, on continue) ; code 1 = échec critique (job ROUGE)
         run: |
+          set +e
           stockhunter world sync --backfill ${{ inputs.backfill || '300' }} --max-files ${{ inputs.max_files || '320' }}
+          c=$?
+          if [ $c -eq 2 ]; then echo "::warning title=Collecte mondiale::dégradation temporaire (code 2)"; exit 0; fi
+          exit $c
       - name: Scanners par place
-        id: scan
-        continue-on-error: true
-        run: stockhunter world scan
+        run: |
+          set +e
+          stockhunter world scan
+          c=$?
+          if [ $c -eq 2 ]; then echo "::warning title=Scanners mondiaux::dégradation (code 2)"; exit 0; fi
+          exit $c
       - name: Réplication internationale pré-enregistrée (docs/research/2026-11-14-preenregistrement-international.md)
         run: stockhunter world replay --markets XNSE
       - name: Classement mondial, portefeuille, état
@@ -95,7 +101,3 @@ jobs:
         with:
           path: var-verify
           key: world-verify-${{ github.run_id }}
-      - name: Échec si la collecte ou les scanners ont planté
-        if: always() && (steps.sync.outcome == 'failure' || steps.scan.outcome == 'failure')
-        run: |
-          echo "::warning::Collecte ou scanner en alerte (code 2) : voir les annotations ci-dessus."

@@ -61,6 +61,15 @@ def collect(engine: Engine, store: WorldStore, fetch: pv.Fetcher | None = None, 
     fetch = fetch or pv.Fetcher()
     now = now or datetime.now(timezone.utc)
     reports: list[sync.Report] = []
+    from stockhunter.world import archive
+    try:                                    # cache Actions perdu ? on restaure d'abord l'historique non reconstituable
+        rr = archive.restore(engine, store)
+        if rr.restored or rr.mismatches:
+            print(f"  Restauration depuis l'archive : {rr.restored} séance(s) ; divergences : {rr.mismatches[:3]}")
+        if rr.mismatches:
+            reports.append(sync.Report("ARCHIVE", "échec", critical=True, errors=rr.mismatches[:3]))
+    except Exception as exc:
+        reports.append(sync.Report("ARCHIVE", "échec", critical=True, errors=[f"restauration : {type(exc).__name__} : {exc}"[:200]]))
     want = set(markets or SCANNED)
     for name, fn in (("change", lambda: [sync.sync_fx(store, fetch)]),
                      ("euronext", lambda: sync.sync_euronext(store, engine, fetch, now)
@@ -72,17 +81,17 @@ def collect(engine: Engine, store: WorldStore, fetch: pv.Fetcher | None = None, 
         try:
             reports += fn()
         except Exception as exc:                           # isolation : une région en panne n'arrête pas les autres
-            reports.append(sync.Report(name, "échec", errors=[f"{type(exc).__name__} : {str(exc)[:200]}"]))
-    bad = 0
+            reports.append(sync.Report(name, "échec", critical=True,
+                                       errors=[f"{type(exc).__name__} : {str(exc)[:200]}"]))
     for r in reports:
         print("  " + r.line())
         if r.status == "échec":
-            bad += 1
-            annotate("warning", f"Collecte {r.market}", "; ".join(r.errors)[:300])
+            annotate("error" if r.critical else "warning", f"Collecte {r.market}"
+                     + (" — échec critique" if r.critical else " — indisponibilité temporaire"), "; ".join(r.errors)[:300])
     state = kv_get(engine, KV_STATE) or {}
     state["collecte"] = {"at": now.isoformat(timespec="seconds"),
-                         "places": {r.market: {"statut": r.status, "ecrites": len(r.written), "erreurs": r.errors[:3],
-                                               "detail": r.detail} for r in reports},
+                         "places": {r.market: {"statut": r.status, "critique": r.critical, "ecrites": len(r.written),
+                                               "erreurs": r.errors[:3], "detail": r.detail} for r in reports},
                          "stockage": store.status()}
     fx = store.load_fx()
     if not fx.empty:                     # derniers taux BCE en base : le tableau de bord (Railway) n'a pas le Parquet
@@ -90,7 +99,96 @@ def collect(engine: Engine, store: WorldStore, fetch: pv.Fetcher | None = None, 
         state["fx_recent"] = [[str(d), c, float(r)] for d, c, r in last[["date", "currency", "rate"]].itertuples(index=False)]
     _kv_set(engine, KV_STATE, state)
     print(f"Stockage mondial : {store.usage_mb():.1f} Mo / {store.budget_mb:.0f} Mo ; appels HTTP : {fetch.calls}")
-    return 2 if bad else 0
+    try:                                    # copie durable des séances non reconstituables (après la collecte)
+        ar = archive.push(engine, store)
+        state["archive"] = {"at": now.isoformat(timespec="seconds"), "ajoutees": ar.archived, "deja": ar.already,
+                            "refus": ar.refused, "taille_mo": ar.size_mb, **archive.status(engine)}
+        _kv_set(engine, KV_STATE, state)
+        print(f"  Archive durable : {ar.archived} séance(s) ajoutée(s), {ar.already} déjà archivée(s), "
+              f"{ar.size_mb} Mo" + (f" — REFUS : {ar.refused}" if ar.refused else ""))
+        if ar.refused or ar.missing_local:
+            reports.append(sync.Report("ARCHIVE", "échec", errors=[ar.refused or f"fichiers absents : {ar.missing_local[:3]}"]))
+    except Exception as exc:
+        reports.append(sync.Report("ARCHIVE", "échec", critical=True, errors=[f"archivage : {type(exc).__name__} : {exc}"[:200]]))
+    places = {r.market: classify_collect(r) for r in reports}
+    write_summary("Collecte mondiale", places)
+    queue_alerts(engine, "collecte", places, now)
+    return exit_code(places)
+
+
+# ============================================================================ statuts (3.2.1)
+OK, NO_OPP, PARTIAL, CRITICAL = "succès", "aucune opportunité", "partiel", "échec critique"
+
+
+def classify_collect(r: sync.Report) -> tuple[str, str]:
+    if r.critical:
+        return CRITICAL, "; ".join(r.errors)[:200]
+    if r.status in ("échec", "partiel", "en attente"):
+        return PARTIAL, "; ".join(r.errors)[:200] or r.detail
+    return OK, r.detail                                     # « rien à faire » : place fermée ou déjà à jour
+
+
+def exit_code(places: dict[str, tuple[str, str]], all_failed_is_critical: bool = False) -> int:
+    """1 = au moins un échec critique (chaîne rouge) ; 2 = dégradation (alerte) ; 0 = succès ou aucune opportunité.
+    `all_failed_is_critical` : si AUCUNE place n'a abouti, c'est une panne d'ensemble (rouge), même si chaque
+    défaillance prise isolément est temporaire."""
+    st = [v[0] for v in places.values()]
+    if CRITICAL in st:
+        return 1
+    if all_failed_is_critical and st and all(x == PARTIAL for x in st):
+        return 1
+    return 2 if PARTIAL in st else 0
+
+
+def write_summary(title: str, places: dict[str, tuple[str, str]]) -> None:
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    icon = {OK: "✅", NO_OPP: "⚪", PARTIAL: "⚠️", CRITICAL: "❌"}
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"\n### {title}\n\n| Place | État | Détail |\n|---|---|---|\n")
+        for k, (st, detail) in sorted(places.items()):
+            f.write(f"| {k} | {icon.get(st, '')} {st} | {str(detail or '').replace('|', '/')[:160]} |\n")
+
+
+def queue_alerts(engine: Engine, stage: str, places: dict[str, tuple[str, str]], now: datetime) -> int:
+    """Alerte Telegram ciblée : une seule par étape, place défaillante et séance attendue (déduplication).
+    Les places Euronext défaillantes ensemble (même fichier) sont regroupées en un message."""
+    from stockhunter.notifications.engine import enqueue
+    bad = {k: v for k, v in places.items() if v[0] in (PARTIAL, CRITICAL)}
+    if not bad:
+        return 0
+    groups: dict[str, list[str]] = {}
+    for k in bad:
+        prov = mk.MARKETS[k].providers[0] if k in mk.MARKETS and mk.MARKETS[k].providers else k
+        groups.setdefault(prov, []).append(k)
+    sent = 0
+    for prov, codes in sorted(groups.items()):
+        try:
+            exp = mk.last_completed_session(mk.get(codes[0]), now) if codes[0] in mk.MARKETS else now.date()
+        except Exception:
+            exp = now.date()
+        worst = CRITICAL if any(bad[c][0] == CRITICAL for c in codes) else PARTIAL
+        key = f"world:{stage}:{prov}:{worst}:{exp}"
+        text = (f"<b>⚠ StockHunter — {stage} mondiale : {worst}</b>\n{', '.join(sorted(codes))} (séance attendue {exp})\n"
+                f"{bad[codes[0]][1][:300]}\n<i>Les autres places et les États-Unis continuent. Détail : page Monde.</i>")
+        if enqueue(engine, "alert", key, text):
+            sent += 1
+    return sent
+
+
+def stale_markets(engine: Engine, store: WorldStore, now: datetime | None = None, max_lag: int = 1) -> dict[str, str]:
+    """Places dotées de cours dont les données ont plus de `max_lag` séance(s) de retard (place fermée : 0)."""
+    out = {}
+    for code in SCANNED:
+        m = mk.get(code)
+        stored = store.stored_sessions(code)
+        if not stored:
+            continue
+        f = mk.freshness(m, stored[-1], now)
+        if f.lag is not None and f.lag > max_lag:
+            out[code] = f"dernière séance {f.last}, attendue {f.expected} ({f.detail})"
+    return out
 
 
 # ============================================================================ scanners
@@ -99,34 +197,48 @@ def scan_all(engine: Engine, store: WorldStore, markets: tuple[str, ...] | None 
     from stockhunter.world import scan as ws
     fx = FxTable.from_long(store.load_fx())
     if fx.wide.empty:
-        annotate("error", "Scanner mondial", "aucun taux de change BCE stocké : conversion impossible")
-        return 2
+        annotate("error", "Scanner mondial — échec critique", "aucun taux de change BCE stocké : conversion impossible")
+        return 1
     validation = registry_decisions()
-    out, bad = {}, 0
+    out, places = {}, {}
+    stale = stale_markets(engine, store)
     for code in markets or SCANNED:
         try:
             res = ws.scan_market(engine, store, code, fx, validation)
             upd = ws.update_outcomes(engine, store, code, fx)
-        except Exception as exc:
-            bad += 1
+        except Exception as exc:                            # panne technique : ROUGE, les autres places continuent
             out[code] = {"statut": "ERREUR", "detail": f"{type(exc).__name__} : {str(exc)[:200]}"}
-            annotate("error", f"Scanner {code}", out[code]["detail"])
+            places[code] = (CRITICAL, out[code]["detail"])
+            annotate("error", f"Scanner {code} — échec critique", out[code]["detail"])
             continue
         n = sum(len(c["candidats"]) for c in res.get("categories", {}).values())
         out[code] = {"statut": res["statut"], "as_of": res.get("as_of"), "univers": res.get("univers", 0),
-                     "selections": n, "seances": res.get("seances"), "suivi": upd, "conclusion": res["conclusion"]}
+                     "selections": n, "seances": res.get("seances"), "suivi": upd, "conclusion": res["conclusion"],
+                     "perime": stale.get(code)}
         if res["statut"] == "ERREUR_DONNEES":
-            bad += 1
+            places[code] = (PARTIAL, res["conclusion"])
             annotate("warning", f"Scanner {code}", res["conclusion"])
+        elif code in stale:
+            places[code] = (PARTIAL, f"données périmées : {stale[code]}")
+            annotate("warning", f"Scanner {code} — données périmées", stale[code])
         elif res["statut"] == "AUCUNE_OPPORTUNITE":
+            places[code] = (NO_OPP, f"séance {res.get('as_of')}, univers {res.get('univers')}")
             annotate("notice", f"Scanner {code}", f"séance du {res.get('as_of')} : aucune configuration ne remplit "
                      f"les règles (univers {res.get('univers')}) — résultat normal, pas une panne")
+        elif res["statut"] == "HISTORIQUE_INSUFFISANT":
+            places[code] = (OK, res["conclusion"])            # attendu (Euronext en constitution), pas une panne
+        else:
+            places[code] = (OK, f"séance {res.get('as_of')}, {n} sélection(s) sur {res.get('univers')} titres")
         print(f"  {code:5} {res['statut']:24} séance {res.get('as_of')}  univers {res.get('univers', 0):5}  "
-              f"sélections {n:3}  suivi {upd}")
+              f"sélections {n:3}  suivi {upd}" + (f"  PÉRIMÉ : {stale[code]}" if code in stale else ""))
     state = kv_get(engine, KV_STATE) or {}
-    state["scanners"] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "places": out}
+    state["scanners"] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "places": out,
+                         "etats": {k: list(v) for k, v in places.items()}}
     _kv_set(engine, KV_STATE, state)
-    return 2 if bad else 0
+    write_summary("Scanners mondiaux", places)
+    queue_alerts(engine, "scanner", places, datetime.now(timezone.utc))
+    # tous les scanners étrangers en échec = panne d'ensemble, même si le scanner US a réussi
+    return exit_code(places, all_failed_is_critical=True)
 
 
 # ============================================================================ portefeuille mondial
@@ -256,7 +368,9 @@ def market_table(engine: Engine, store: WorldStore, now: datetime | None = None)
         row = {"code": m.code, "nom": m.name, "pays": m.country_name, "region": m.region, "devise": m.currency,
                "donnees": m.data, "fournisseurs": ", ".join(m.providers) or "—", "note": m.note,
                "seances": n_stored, "derniere": str(last) if last else None, "listings": cnt.get(m.code, {}),
-               "collecte": coll.get(m.code), "scanner": scans.get(m.code)}
+               "collecte": coll.get(m.code), "scanner": scans.get(m.code),
+               "etat": _worst(((state.get("scanners") or {}).get("etats") or {}).get(m.code),
+                              coll.get(m.code), coll.get(_EURONEXT_GROUP.get(m.code, "")))}
         if m.code == "US":
             row.update(seances=None, derniere=str(us_run.as_of) if us_run else None,
                        listings={"actifs": us_n, "principal": us_n},
@@ -282,6 +396,21 @@ def fx_for_display(engine: Engine, store: WorldStore) -> FxTable:
         fx = pd.DataFrame([{"date": pd.Timestamp(d).date(), "currency": c, "rate": r} for d, c, r in rows],
                           columns=["date", "currency", "rate"])
     return FxTable.from_long(fx)
+
+
+_EURONEXT_GROUP: dict[str, str] = {}
+
+
+def _worst(scan_state, coll, _unused=None) -> str | None:
+    """État affiché d'une place : le pire de la collecte et du scanner (échec critique > partiel > succès)."""
+    order = [CRITICAL, PARTIAL, NO_OPP, OK]
+    cands = []
+    if scan_state:
+        cands.append(scan_state[0])
+    if coll:
+        cands.append(CRITICAL if coll.get("critique") else PARTIAL if coll.get("statut") in ("échec", "partiel", "en attente")
+                     else OK)
+    return min(cands, key=order.index) if cands else None
 
 
 def status_text(engine: Engine, store: WorldStore) -> str:

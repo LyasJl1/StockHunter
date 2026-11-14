@@ -491,3 +491,66 @@ def test_replay_future_discontinuity_does_not_change_past_signals(tmp_path):
         cutoff = ss[-40]
         sigs.append(sorted((s.as_of, s.key, s.category) for s in res["signaux"] if s.as_of <= cutoff))
     assert sigs[0] == sigs[1] and sigs[0]
+
+
+# ============================================================================ 3.2.1 : sauvegarde durable
+def test_archive_push_verify_restore_roundtrip(tmp_path, engine):
+    import shutil
+    from stockhunter.world import archive as wa
+    st = WorldStore(tmp_path / "w")
+    ss = synth_market(st, "XPAR", 12, 15)
+    r = wa.push(engine, st)
+    assert r.archived == 12 and r.refused is None
+    assert wa.push(engine, st).archived == 0                                   # incrémental
+    v = wa.verify(engine, st)
+    assert v.verified == 12 and not v.mismatches and not v.missing_archive
+    before = {d: st.path("XPAR", d).read_bytes() for d in ss}
+    shutil.rmtree(tmp_path / "w")                                              # le cache Actions disparaît
+    fresh = WorldStore(tmp_path / "w")
+    rr = wa.restore(engine, fresh)
+    assert rr.restored == 12 and not rr.mismatches
+    again = WorldStore(tmp_path / "w")
+    assert again.stored_sessions("XPAR") == ss and all(again.path("XPAR", d).read_bytes() == before[d] for d in ss)
+    assert again.load("XPAR")["close"].notna().all()
+    # un fichier local altéré n'est jamais écrasé : divergence signalée
+    p = again.path("XPAR", ss[0])
+    p.write_bytes(p.read_bytes() + b"x")
+    assert wa.verify(engine, again).mismatches and wa.restore(engine, again).mismatches
+    assert p.read_bytes().endswith(b"x")
+
+
+def test_archive_respects_budget_and_never_deletes(tmp_path, engine):
+    from sqlalchemy import func, select
+    from stockhunter.db.models import WorldArchive
+    from stockhunter.world import archive as wa
+    st = WorldStore(tmp_path / "w")
+    synth_market(st, "XAMS", 10, 15)
+    r = wa.push(engine, st, budget_mb=0.02)
+    assert r.refused and "budget" in r.refused and r.archived < 10
+    n = r.archived
+    assert wa.push(engine, st).archived == 10 - n                             # reprise après interruption
+    with session_scope(engine) as s:
+        assert s.scalar(select(func.count()).select_from(WorldArchive)) == 10
+
+
+def test_collect_restores_lost_cache_before_collecting(tmp_path, engine):
+    import shutil
+    from stockhunter.world import archive as wa
+    st = WorldStore(tmp_path / "w")
+    synth_market(st, "XPAR", 5, 10)
+    wa.push(engine, st)
+    shutil.rmtree(tmp_path / "w")
+    fetch = pv.Fetcher(get=lambda u: (503, b"", ""), min_interval_s=0, sleep=lambda s: None, retries=0)
+    wr.collect(engine, WorldStore(tmp_path / "w"), fetch, datetime(2026, 11, 14, 12, tzinfo=UTC), markets=("XPAR",))
+    assert len(WorldStore(tmp_path / "w").stored_sessions("XPAR")) == 5
+
+
+def test_ranking_excludes_stale_markets(store, engine):
+    fx = fx_table(date(2025, 1, 1), D)
+    synth_market(store, "XPAR", 260, 40, trend_first=12)
+    res = ws.scan_market(engine, store, "XPAR", fx)
+    n = sum(len(v["candidats"]) for v in res["categories"].values())
+    fresh = rk.global_ranking(engine, now=datetime(2026, 11, 14, 12, tzinfo=UTC))
+    late = rk.global_ranking(engine, now=datetime(2026, 11, 20, 12, tzinfo=UTC))      # 5 séances plus tard
+    assert fresh["total"] == len({c["isin"] for v in res["categories"].values() for c in v["candidats"]}) and n
+    assert late["total"] == 0 and "XPAR" in late["exclues_perimees"]

@@ -30,6 +30,7 @@ INACTIVE_AFTER_SESSIONS = 10
 class Report:
     market: str
     status: str = "ok"                    # ok | rien à faire | partiel | échec
+    critical: bool = False                # 3.2.1 : données corrompues / exception = échec critique (chaîne rouge)
     written: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -49,6 +50,7 @@ def sync_fx(store: WorldStore, fetch: pv.Fetcher, start: date = date(2023, 1, 1)
         df = pv.parse_ecb(fetch(pv.ECB_URL.format(start=since.isoformat()), "csv"))
     except (pv.SourceUnavailable, pv.NoSession) as exc:
         rep.status, rep.errors = "échec", [str(exc)]
+        rep.critical = isinstance(exc, pv.DataCorrupted)
         return rep
     added = store.save_fx(df)
     rep.status = "ok" if added else "rien à faire"
@@ -80,6 +82,7 @@ def sync_euronext(store: WorldStore, engine: Engine | None, fetch: pv.Fetcher, n
     except (pv.SourceUnavailable, pv.NoSession) as exc:
         for c in todo:
             reps[c].status, reps[c].errors = "échec", [str(exc)]
+            reps[c].critical = isinstance(exc, pv.DataCorrupted)
         return list(reps.values())
     for c in todo:
         m, r = mk.get(c), reps[c]
@@ -132,6 +135,10 @@ def sync_india(store: WorldStore, engine: Engine | None, fetch: pv.Fetcher, code
                 store.mark_missing(code, d, "absent chez la source (férié non prévu au calendrier ?)")
                 rep.missing.append(str(d))
             continue
+        except pv.DataCorrupted as exc:                 # fichier reçu mais inexploitable : critique
+            rep.errors.append(f"{d} : {exc}")
+            rep.critical = True
+            continue
         except pv.SourceUnavailable as exc:
             rep.errors.append(f"{d} : {exc}")
             consecutive_fail += 1
@@ -154,6 +161,8 @@ def sync_india(store: WorldStore, engine: Engine | None, fetch: pv.Fetcher, code
             update_master(engine, df, m.providers[0])
     rest = len(targets) - min(len(targets), max_files)
     rep.status = "échec" if rep.errors and not rep.written else ("partiel" if rep.errors else "ok")
+    if rep.errors and all("pas encore publié" in e for e in rep.errors):
+        rep.status = "partiel" if rep.written else "en attente"   # publication retardée : ni panne ni succès
     rep.detail = f"{len(rep.written)} séance(s) écrite(s), {rest} restante(s) à reconstituer"
     return rep
 

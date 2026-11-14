@@ -2,15 +2,26 @@
 {% block content %}
 <div class="banner">Couverture mondiale progressive : {{ v.n_covered }} places avec des cours quotidiens gratuits et vérifiés, {{ v.n_listings }} sociétés (listing principal). Les autres places sont affichées comme indisponibles, jamais comme couvertes. Cours = clôtures de la séance indiquée pour chaque place (pas de cours en direct) ; le score est une position relative, pas une probabilité.</div>
 
+<div class="grid g4" style="margin:12px 0">
+  <div class="card"><h2>Places réellement actives</h2><div class="kpi">{{ v.active|length }}</div><div class="sub">{{ v.active|map(attribute='code')|join(', ') or 'aucune' }} · scanner exécuté sur la dernière séance</div></div>
+  <div class="card"><h2>Actions analysées</h2><div class="kpi">{{ v.n_analysed }}</div><div class="sub">univers négociable (liquidité, historique) des places actives</div></div>
+  <div class="card"><h2>Opportunités distinctes</h2><div class="kpi">{{ v.rank.total }}</div><div class="sub">sociétés dédupliquées (ISIN), toutes catégories</div></div>
+  <div class="card"><h2>Sauvegarde durable</h2>{% if v.archive %}<div class="kpi">{{ v.archive.total_mo|num(1) }} Mo</div><div class="sub">{{ v.archive.places|length }} place(s) archivée(s) en base · dernier passage {{ v.archive.at }}{% if v.archive.refus %} · <span class="neg">{{ v.archive.refus }}</span>{% endif %}</div>{% else %}<div class="kpi neg">—</div><div class="sub">aucune archive : historique Euronext seulement dans le cache Actions</div>{% endif %}</div>
+</div>
+{% if v.failed %}<div class="banner" style="border-color:var(--neg)"><b>Places en échec ou dégradées :</b> {% for r in v.failed %}{{ r.code }} ({{ r.etat }}{% if r.collecte and r.collecte.erreurs %} — {{ r.collecte.erreurs[0] }}{% endif %}{% if r.scanner and r.scanner.perime %} — {{ r.scanner.perime }}{% endif %}){{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
+
 <h2>Marchés mondiaux</h2>
 <div class="card" style="overflow-x:auto"><table>
-<tr><th>Place</th><th>Pays</th><th class="hide-sm">Région</th><th>Devise</th><th>Données</th><th class="r">Listings</th><th class="r">Séances stockées</th><th>Dernière séance</th><th>Fraîcheur</th><th>Scanner</th><th class="hide-sm">Source</th></tr>
+<tr><th>Place</th><th>Pays</th><th class="hide-sm">Région</th><th>Devise</th><th>Données</th><th class="r">Listings</th><th class="r">Séances stockées</th><th>Qualité de l'historique</th><th>Dernière séance</th><th>Fraîcheur</th><th>État</th><th>Scanner</th><th class="hide-sm">Source</th></tr>
 {% for r in v.markets %}<tr class="{{ 'muted' if r.donnees != 'cours quotidiens' }}">
 <td>{{ r.code }} — {{ r.nom }}</td><td>{{ r.pays }}</td><td class="hide-sm">{{ r.region }}</td><td>{{ r.devise }}</td>
 <td title="{{ r.note }}">{{ r.donnees }}</td>
 <td class="r">{{ (r.listings or {}).get('actifs', 0) }}</td>
-<td class="r">{{ r.seances if r.seances is not none else '—' }}</td><td>{{ r.derniere or '—' }}</td>
+<td class="r">{{ r.seances if r.seances is not none else '—' }}</td>
+<td>{% if r.donnees == 'cours quotidiens' and r.seances is not none %}{{ [r.seances, 130]|min }}/130 séances{% if r.seances < 130 %} (en constitution){% endif %}{% elif r.code == 'US' %}2 ans (Massive){% else %}—{% endif %}</td>
+<td>{{ r.derniere or '—' }}</td>
 <td class="{{ 'neg' if r.fraicheur and 'retard' in r.fraicheur }}">{{ r.fraicheur or '—' }}</td>
+<td class="{{ 'neg' if r.etat in ('échec critique', 'partiel') }}">{{ r.etat or '—' }}</td>
 <td>{% if r.scanner %}{{ r.scanner.statut }}{% if r.scanner.univers %} · {{ r.scanner.univers }} analysées{% endif %}{% else %}—{% endif %}</td>
 <td class="hide-sm">{{ r.fournisseurs }}</td></tr>{% endfor %}
 </table><p class="sub">Survoler la colonne « Données » pour la note de couverture. Stockage mondial : {{ v.storage.occupation_mo|num(1) }} Mo / {{ v.storage.budget_mo|num(0) }} Mo (hors base PostgreSQL) · dernier taux BCE : {{ v.fx_last|d }}.</p></div>
@@ -49,8 +60,13 @@
 <div class="card"><canvas id="weq" height="70"></canvas>
 <table style="margin-top:10px"><tr><th>Référence (même période, même devise)</th><th class="r">Rendement</th></tr>
 {% for k, r in p.references.items() %}<tr><td>{{ k }}</td><td class="r">{{ r|pct }}</td></tr>{% endfor %}</table>
-<p class="sub">Expositions : pays {{ p.expositions.country or {} }} · devises {{ p.expositions.currency or {} }}. Dividendes non inclus ; frais de change 25 pb par conversion ; règles de trading identiques au paper trading US.</p></div>
+<p class="sub">Moteur : {{ s.moteur or 'événementiel' }} (décisions avec les seules informations publiées à l'instant de l'ordre). Expositions : pays {{ p.expositions.country or {} }} · devises {{ p.expositions.currency or {} }}. Dividendes non inclus ; frais de change 25 pb par conversion ; règles de trading identiques au paper trading US.</p></div>
 {% else %}<p class="muted">Pas encore de portefeuille mondial simulé : il apparaîtra après le premier passage de la chaîne nocturne 3.2.</p>{% endif %}
+
+<h2 style="margin-top:18px">Niveau de validation des stratégies</h2>
+<div class="card"><p>Stratégies validées : <b>{{ v.validation.valides|length or 'aucune' }}</b> (famille de {{ v.validation.tests_famille }} tests, seuil t ≥ 3,0 corrigé des tests multiples).</p>
+<table><tr><th>Test international pré-enregistré</th><th>Décision</th><th class="r">t</th></tr>{% for i, d, t in v.validation.international %}<tr><td>{{ i }}</td><td>{{ d }}</td><td class="r">{{ t|num(2) }}</td></tr>{% endfor %}</table>
+<p class="sub">Les sélections sont des pistes de recherche, pas des recommandations validées.</p></div>
 
 <h2 style="margin-top:18px">Santé par fournisseur</h2>
 <div class="card" style="overflow-x:auto"><table><tr><th>Fournisseur</th><th>Places</th><th>Capacités</th><th>État</th><th>Quota</th><th>Historique</th><th>Licence</th></tr>

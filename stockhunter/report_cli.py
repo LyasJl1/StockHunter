@@ -487,6 +487,18 @@ def cmd_world(settings, engine, args) -> int:
                           max_files=args.max_files or settings.world_max_files, markets=codes)
     if args.action == "scan":
         return wr.scan_all(engine, store, codes)
+    if args.action in ("archive", "archive-verify", "restore"):
+        from stockhunter.world import archive as wa
+        mk_codes = codes or wa.NON_RECONSTRUCTIBLE
+        rep = (wa.push(engine, store, mk_codes) if args.action == "archive" else
+               wa.verify(engine, store, mk_codes) if args.action == "archive-verify" else wa.restore(engine, store, mk_codes))
+        print(f"{args.action} : archivées {rep.archived}, déjà {rep.already}, restaurées {rep.restored}, vérifiées "
+              f"{rep.verified}, divergences {len(rep.mismatches)}, absentes localement {len(rep.missing_local)}, "
+              f"non archivées {len(rep.missing_archive)}, archive {rep.size_mb} Mo" + (f", REFUS : {rep.refused}" if rep.refused else ""))
+        for x in rep.mismatches[:10]:
+            print("  DIVERGENCE", x)
+        print(wa.status(engine))
+        return 1 if rep.mismatches else (2 if rep.refused or rep.missing_archive else 0)
     if args.action == "portfolio":
         return wr.run_portfolio(engine, store, args.base)
     if args.action == "replay":                      # étude pré-enregistrée : rien n'est écrit en base
@@ -677,7 +689,8 @@ def add_parsers(sub) -> dict:
     db.add_argument("--insecure-cookies", action="store_true", help="HTTP local uniquement (pas de HTTPS)")
     db.add_argument("--telegram-worker", action="store_true", help="répondre aux commandes Telegram en continu")
     wo = sub.add_parser("world", help="3.2 : marchés mondiaux (registre, collecte, scanners, classement, portefeuille)")
-    wo.add_argument("action", choices=["markets", "sync", "scan", "ranking", "portfolio", "replay", "status"])
+    wo.add_argument("action", choices=["markets", "sync", "scan", "ranking", "portfolio", "replay", "status",
+                                       "archive", "archive-verify", "restore"])
     wo.add_argument("--json", help="replay : fichier de résultats")
     wo.add_argument("--markets", help="places (codes du registre, séparés par des virgules), défaut : toutes")
     wo.add_argument("--backfill", type=int, help="séances d'historique à reconstituer (défaut : réglage)")
