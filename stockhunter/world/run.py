@@ -28,7 +28,9 @@ from stockhunter.world.store import WorldStore
 
 KV_STATE = "world_state"
 KV_PORTFOLIO = "world_portfolio"
-SCANNED = ("XPAR", "XAMS", "XBRU", "XLIS", "XDUB", "XMIL", "XOSL", "XNSE", "XBOM")
+# places collectées et scannées : celles dont les cours sont réellement disponibles ET autorisés (registre)
+SCANNED = tuple(c for c in ("XPAR", "XAMS", "XBRU", "XLIS", "XDUB", "XMIL", "XOSL", "XNSE", "XBOM")
+                if mk.MARKETS[c].data == mk.PRICES)
 
 
 def annotate(level: str, title: str, msg: str) -> None:
@@ -72,7 +74,10 @@ def collect(engine: Engine, store: WorldStore, fetch: pv.Fetcher | None = None, 
         reports.append(sync.Report("ARCHIVE", "échec", critical=True, errors=[f"restauration : {type(exc).__name__} : {exc}"[:200]]))
     want = set(markets or SCANNED)
     for name, fn in (("change", lambda: [sync.sync_fx(store, fetch)]),
-                     ("euronext", lambda: sync.sync_euronext(store, engine, fetch, now)
+                     ("euronext", lambda: (sync.sync_euronext(store, engine, fetch, now) if mk._euronext_enabled()
+                                           else [sync.Report(c, "rien à faire", detail="collecte non autorisée par les "
+                                                             "conditions d'euronext.com (désactivée)")
+                                                 for c in sorted(want & set(sync.EURONEXT_MARKETS))])
                       if want & set(sync.EURONEXT_MARKETS) else []),
                      ("nse", lambda: [sync.sync_india(store, engine, fetch, "XNSE", now, backfill_sessions, max_files)]
                       if "XNSE" in want else []),

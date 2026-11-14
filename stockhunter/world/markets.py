@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+NOT_AUTHORIZED = "collecte automatique non autorisée (conditions du site)"
 PRICES, LIST_ONLY, NONE, QUOTA = "cours quotidiens", "liste des titres seulement", "aucune source gratuite fiable", \
     "cours disponibles mais quota insuffisant"
 
@@ -50,8 +51,19 @@ class Market:
         return {"Amérique du Nord": "Amériques", "Amérique latine": "Amériques"}.get(self.region, self.region)
 
 
-EURONEXT_NOTE = ("Instantané officiel de fin de séance (toutes les actions Euronext, OHLC, volume, montant échangé). "
-                 "Pas d'historique gratuit : l'historique se constitue jour après jour à partir de la première collecte.")
+EURONEXT_NOTE = ("Instantané officiel de fin de séance (toutes les actions Euronext, OHLC, volume, montant échangé), "
+                 "sans historique gratuit. 3.2.1 : les conditions d'utilisation d'euronext.com interdisent sans "
+                 "autorisation écrite l'accès automatisé (« robots ») et l'extraction systématique pour constituer une "
+                 "base : collecte DÉSACTIVÉE (réactivable par SH_WORLD_EURONEXT_ENABLED=true une fois l'autorisation "
+                 "obtenue). Séances déjà collectées conservées.")
+
+
+def _euronext_enabled() -> bool:
+    import os
+    return os.environ.get("SH_WORLD_EURONEXT_ENABLED", "").strip().lower() in ("1", "true", "yes", "oui")
+
+
+_EURONEXT_DATA = "cours quotidiens" if _euronext_enabled() else "collecte automatique non autorisée (conditions du site)"
 INDIA_NOTE = ("Bhavcopy officiel quotidien (OHLC, volume, montant, cours de référence ajusté des opérations sur titres) ; "
               "archives publiques permettant de reconstituer l'historique.")
 
@@ -65,19 +77,19 @@ MARKETS: dict[str, Market] = {m.code: m for m in [
            "CAD", time(16, 0), 120, NONE, (), "Aucune source gratuite de cours de tout le marché identifiée."),
     # ------------------------------------------------------------------ Europe
     Market("XPAR", "Euronext Paris", "FR", "France", "Europe", ("XPAR", "ALXP", "XMLI"), "XPAR", "Europe/Paris", "EUR",
-           time(17, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(17, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XAMS", "Euronext Amsterdam", "NL", "Pays-Bas", "Europe", ("XAMS",), "XAMS", "Europe/Amsterdam", "EUR",
-           time(17, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(17, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XBRU", "Euronext Bruxelles", "BE", "Belgique", "Europe", ("XBRU",), "XBRU", "Europe/Brussels", "EUR",
-           time(17, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(17, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XLIS", "Euronext Lisbonne", "PT", "Portugal", "Europe", ("XLIS",), "XLIS", "Europe/Lisbon", "EUR",
-           time(16, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(16, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XDUB", "Euronext Dublin", "IE", "Irlande", "Europe", ("XDUB",), "XDUB", "Europe/Dublin", "EUR",
-           time(16, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(16, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XMIL", "Euronext Milan (Borsa Italiana)", "IT", "Italie", "Europe", ("XMIL",), "XMIL", "Europe/Rome", "EUR",
-           time(17, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(17, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XOSL", "Euronext Oslo Børs", "NO", "Norvège", "Europe", ("XOSL",), "XOSL", "Europe/Oslo", "NOK",
-           time(16, 20), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(16, 20), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XETR", "Xetra / Francfort", "DE", "Allemagne", "Europe", ("XETR", "XFRA"), "XETR", "Europe/Berlin", "EUR",
            time(17, 30), 60, NONE, (), "Liste des instruments Xetra non accessible au sondage (504) ; pas de cours "
            "gratuits de tout le marché (le jeu de données public Deutsche Börse n'est plus publié)."),

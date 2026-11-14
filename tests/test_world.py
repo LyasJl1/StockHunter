@@ -41,7 +41,8 @@ def test_registry_covers_all_target_markets_honestly():
         assert m.region in mk.REGIONS and len(m.currency) == 3 and len(m.country) == 2
         datetime(2026, 1, 1, tzinfo=__import__("zoneinfo").ZoneInfo(m.tz))       # fuseau valide
     priced = {m.code for m in mk.with_prices()}
-    assert priced == {"US", "XPAR", "XAMS", "XBRU", "XLIS", "XDUB", "XMIL", "XOSL", "XNSE", "XBOM"}
+    assert priced == {"US", "XNSE", "XBOM"}                    # 3.2.1 : Euronext non autorisé par défaut
+    assert mk.get("XPAR").data == mk.NOT_AUTHORIZED
     assert mk.get("XLON").data == mk.NONE and mk.get("XSHG").data == mk.QUOTA      # pas de couverture prétendue
 
 
@@ -373,7 +374,16 @@ def test_blocked_source_stops_after_three_failures(store, engine):
 
 
 # ============================================================================ 18. isolation des pannes par région
-def test_region_failure_isolation(store, engine):
+def test_euronext_not_collected_without_authorization(store, engine):
+    calls = []
+    fetch = pv.Fetcher(get=lambda u: calls.append(u) or (503, b"", ""), min_interval_s=0, sleep=lambda s: None, retries=0)
+    wr.collect(engine, store, fetch, datetime(2026, 11, 14, 12, tzinfo=UTC), markets=("XPAR",))
+    assert not [u for u in calls if "euronext" in u]
+    assert "non autorisée" in wr.kv_get(engine, wr.KV_STATE)["collecte"]["places"]["XPAR"]["detail"]
+
+
+def test_region_failure_isolation(store, engine, monkeypatch):
+    monkeypatch.setenv("SH_WORLD_EURONEXT_ENABLED", "true")    # cas d'une autorisation obtenue
     def get(url):
         if "euronext" in url:
             raise ConnectionError("réseau")

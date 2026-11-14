@@ -490,7 +490,7 @@ def cmd_world(settings, engine, args) -> int:
     if args.action in ("archive", "archive-verify", "restore"):
         from stockhunter.world import archive as wa
         mk_codes = codes or wa.NON_RECONSTRUCTIBLE
-        rep = (wa.push(engine, store, mk_codes) if args.action == "archive" else
+        rep = (wa.push(engine, store, mk_codes, budget_mb=args.budget_mb) if args.action == "archive" else
                wa.verify(engine, store, mk_codes) if args.action == "archive-verify" else wa.restore(engine, store, mk_codes))
         print(f"{args.action} : archivées {rep.archived}, déjà {rep.already}, restaurées {rep.restored}, vérifiées "
               f"{rep.verified}, divergences {len(rep.mismatches)}, absentes localement {len(rep.missing_local)}, "
@@ -692,6 +692,7 @@ def add_parsers(sub) -> dict:
     wo.add_argument("action", choices=["markets", "sync", "scan", "ranking", "portfolio", "replay", "status",
                                        "archive", "archive-verify", "restore"])
     wo.add_argument("--json", help="replay : fichier de résultats")
+    wo.add_argument("--budget-mb", type=float, default=60.0, help="archive : budget de l'archive durable (Mo)")
     wo.add_argument("--markets", help="places (codes du registre, séparés par des virgules), défaut : toutes")
     wo.add_argument("--backfill", type=int, help="séances d'historique à reconstituer (défaut : réglage)")
     wo.add_argument("--max-files", type=int, help="fichiers au plus par place et par passage")

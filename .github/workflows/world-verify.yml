@@ -63,6 +63,14 @@ jobs:
           c=$?
           if [ $c -eq 2 ]; then echo "::warning title=Scanners mondiaux::dégradation (code 2)"; exit 0; fi
           exit $c
+      - name: Sauvegarde durable — archivage, perte simulée du cache, restauration, intégrité (données réelles NSE)
+        run: |
+          stockhunter world archive --markets XNSE --budget-mb 400
+          mv var-verify/world/bars/XNSE var-verify/xnse-perdu
+          stockhunter world restore --markets XNSE
+          stockhunter world archive-verify --markets XNSE
+          diff -r var-verify/xnse-perdu var-verify/world/bars/XNSE && echo "RESTAURATION IDENTIQUE OCTET POUR OCTET"
+          rm -rf var-verify/xnse-perdu
       - name: Réplication internationale pré-enregistrée (docs/research/2026-11-14-preenregistrement-international.md)
         run: stockhunter world replay --markets XNSE
       - name: Classement mondial, portefeuille, état

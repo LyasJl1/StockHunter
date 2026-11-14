@@ -30,7 +30,9 @@ from stockhunter.db.models import WorldArchive
 from stockhunter.db.session import session_scope
 from stockhunter.world.store import WorldStore
 
-NON_RECONSTRUCTIBLE = ("XPAR", "XAMS", "XBRU", "XLIS", "XDUB", "XMIL", "XOSL")   # Euronext : pas d'historique gratuit
+# séances non reconstituables (Euronext : pas d'historique gratuit). Archivées même si la collecte est suspendue :
+# ce qui a déjà été collecté est conservé (jamais supprimé), dans la base privée, sans redistribution.
+NON_RECONSTRUCTIBLE = ("XPAR", "XAMS", "XBRU", "XLIS", "XDUB", "XMIL", "XOSL")
 BUDGET_MB = 60.0
 MAX_DB_SHARE = 0.85
 
