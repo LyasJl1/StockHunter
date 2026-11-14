@@ -6,3 +6,11 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .venv/
+build/
+dist/
+var-verify/
+*.parquet
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/

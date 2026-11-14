@@ -267,6 +267,8 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
 
     from stockhunter.dashboard import v3
     v3.register(app, engine, settings, guard, render)
+    from stockhunter.dashboard import world as world_page
+    world_page.register(app, engine, settings, guard, render)
     return app
 
 

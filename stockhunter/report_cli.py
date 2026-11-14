@@ -430,10 +430,12 @@ def cmd_discover(settings, engine, args) -> int:
             print(f"  {cat:10} signaux {r['signaux']:4}  finalisés {r['finalises']:4}  trades {r['trades']:4}  "
                   f"R moyen {r['r_moyen'] if r['r_moyen'] is None else round(r['r_moyen'], 2)}  ({r['lecture']})")
         return 0
+    from stockhunter.pipeline import expected_session
+    from stockhunter.world.run import annotate
     try:
         p = load_panel(engine, MarketStore(settings.market_dir))
-    except RuntimeError as exc:
-        print(f"IGNORÉ : {exc}")
+    except RuntimeError as exc:                      # données absentes : alerte (code 2), pas une panne technique
+        annotate("warning", "Découverte : données absentes", str(exc))
         return 2
     res = disc.run(p, dstore.ticker_names(engine), validation=dstore.registry_decisions())
     run_id, created = dstore.save(engine, res)
@@ -456,6 +458,86 @@ def cmd_discover(settings, engine, args) -> int:
             print(f"  actualités indisponibles : {exc}")
         print(f"Analyse approfondie : {dstore.deepen(engine, res, p, sec, fin)}")
     print(f"Suivi des signaux : {dstore.update_outcomes(engine, p)}")
+    n = sum(len(v["candidats"]) for v in res["categories"].values())
+    if n == 0:
+        annotate("notice", "Découverte : aucune opportunité", f"séance du {res['as_of']} : aucune configuration ne "
+                 f"remplit les règles (univers {res['univers']} titres). Résultat normal, pas une panne.")
+    exp = expected_session()
+    if res["as_of"] < exp:                           # séance attendue absente : réessayée au créneau suivant
+        annotate("warning", "Découverte : séance attendue absente", f"dernière séance des données de marché "
+                 f"{res['as_of']}, séance attendue {exp} : classement du {exp} non encore produit")
+        return 2
+    return 0
+
+
+def cmd_world(settings, engine, args) -> int:
+    """3.2 : marchés mondiaux (registre, collecte, scanners, classement, portefeuille simulé)."""
+    from stockhunter.world import markets as wm
+    from stockhunter.world import run as wr
+    from stockhunter.world.store import WorldStore
+    store = WorldStore(settings.world_dir, settings.world_budget_mb)
+    codes = tuple(c.strip().upper() for c in args.markets.split(",")) if args.markets else None
+    if args.action == "markets":
+        for m in wm.MARKETS.values():
+            print(f"{m.code:5} {m.country} {m.region:16} {m.currency} {m.data:40} {m.name}")
+        return 0
+    if args.action == "sync":
+        return wr.collect(engine, store, backfill_sessions=args.backfill if args.backfill is not None
+                          else settings.world_backfill_sessions,
+                          max_files=args.max_files or settings.world_max_files, markets=codes)
+    if args.action == "scan":
+        return wr.scan_all(engine, store, codes)
+    if args.action == "portfolio":
+        return wr.run_portfolio(engine, store, args.base)
+    if args.action == "replay":                      # étude pré-enregistrée : rien n'est écrit en base
+        import json as _json
+        from stockhunter.world import replay as rp
+        from stockhunter.world.fx import FxTable
+        from stockhunter.world.portfolio import GlobalConfig, benchmarks, simulate
+        fx = FxTable.from_long(store.load_fx())
+        out = []
+        for code in codes or ("XNSE",):
+            res = rp.replay(store, code, fx)
+            print(f"Réplication {code} : {res['statut']} — {res.get('dates_signal', 0)} dates de signal "
+                  f"({res.get('premiere')} → {res.get('derniere')})")
+            for k, c in res["categories"].items():
+                t = "N/D" if c["t"] is None else f"{c['t']:+.2f}"
+                ex = "N/D" if c["exces_net_moyen"] is None else f"{c['exces_net_moyen'] * 100:+.2f} %"
+                print(f"  {k:9} dates {c['dates']:3}  écart net moyen {ex:>9}  t(NW) {t:>6}  moitiés "
+                      f"{['N/D' if h is None else round(h * 100, 2) for h in c['moities']]}  -> {c['decision']}")
+            pf = {}
+            if res.get("signaux"):
+                p = res["panel"]
+                bars = {(code, k): __import__("pandas").DataFrame({c: getattr(p, c)[k] for c in ("open", "high", "low", "close")}).dropna()
+                        for k in {s.key for s in res["signaux"]}}
+                for base in ("EUR", "USD"):
+                    sim = simulate(res["signaux"], bars, fx, GlobalConfig(base=base))
+                    sm = sim.summary
+                    ref = benchmarks({f"équipondéré {code}": (p.bench, wm.get(code).currency)}, fx, base,
+                                     sm.get("debut"), sm.get("fin")) if sm.get("debut") else {}
+                    pf[base] = {**{k: sm.get(k) for k in ("rendement_total", "drawdown_max", "trades_clos", "gagnants",
+                                                         "r_moyen", "debut", "fin", "frais", "lecture")},
+                                "references": ref, "refus": len(sim.refused)}
+                    print(f"  portefeuille simulé ({base}) : {pf[base]}")
+            out.append({k: v for k, v in res.items() if k not in ("signaux", "panel")} | {"portefeuille": pf})
+        if args.json:
+            with open(args.json, "w") as fh:
+                _json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
+        print("RESULTATS_JSON " + _json.dumps(out, ensure_ascii=False, default=str))
+        return 0
+    if args.action == "ranking":
+        from stockhunter.world.fx import FxTable
+        from stockhunter.world.ranking import global_ranking
+        res = global_ranking(engine, FxTable.from_long(store.load_fx()), top=args.top,
+                             region=args.region, country=args.country)
+        print(f"Classement mondial : {res['total']} sélections distinctes ({res['apres_filtres']} après filtres)")
+        print(f"{'Rang':>4}  {'Action':28} {'Pays':4} {'Bourse':26} {'Dev':3} {'Catégories':28} {'Score':>5} Risque")
+        for r in res["lignes"]:
+            print(f"{r.rank:>4}  {(r.ticker + ' ' + (r.name or ''))[:28]:28} {r.country:4} {r.exchange[:26]:26} "
+                  f"{r.currency:3} {', '.join(r.categories)[:28]:28} {r.norm:5.2f} {r.risk}  (séance {r.as_of})")
+        print(res["avertissement"])
+        return 0
+    print(wr.status_text(engine, store))
     return 0
 
 
@@ -594,9 +676,19 @@ def add_parsers(sub) -> dict:
     db.add_argument("--port", type=int, default=8000)
     db.add_argument("--insecure-cookies", action="store_true", help="HTTP local uniquement (pas de HTTPS)")
     db.add_argument("--telegram-worker", action="store_true", help="répondre aux commandes Telegram en continu")
+    wo = sub.add_parser("world", help="3.2 : marchés mondiaux (registre, collecte, scanners, classement, portefeuille)")
+    wo.add_argument("action", choices=["markets", "sync", "scan", "ranking", "portfolio", "replay", "status"])
+    wo.add_argument("--json", help="replay : fichier de résultats")
+    wo.add_argument("--markets", help="places (codes du registre, séparés par des virgules), défaut : toutes")
+    wo.add_argument("--backfill", type=int, help="séances d'historique à reconstituer (défaut : réglage)")
+    wo.add_argument("--max-files", type=int, help="fichiers au plus par place et par passage")
+    wo.add_argument("--base", default="EUR", choices=["EUR", "USD"])
+    wo.add_argument("--top", type=int, default=20, help="5, 10, 20, 50 ou 0 (toutes)")
+    wo.add_argument("--region")
+    wo.add_argument("--country")
     cp = sub.add_parser("db", help="copie de la base vers une autre (migration vers PostgreSQL)")
     cp.add_argument("action", choices=["copy-to", "tune", "diag", "check"])
     cp.add_argument("target", nargs="?", help="copy-to : URL de la base cible, déjà migrée et vide")
     return {"scan": cmd_scan, "top": cmd_top, "explain": cmd_explain, "analyse": cmd_analyse, "lab": cmd_lab, "pipeline": cmd_pipeline, "discover": cmd_discover, "history": cmd_history, "validate": cmd_validate, "market": cmd_market,
             "research": cmd_research, "paper": cmd_paper, "forward": cmd_forward, "notify": cmd_notify,
-            "dashboard": cmd_dashboard, "db": cmd_db}
+            "dashboard": cmd_dashboard, "db": cmd_db, "world": cmd_world}

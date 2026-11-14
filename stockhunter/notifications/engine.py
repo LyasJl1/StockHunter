@@ -215,7 +215,8 @@ def flush(engine: Engine, client: TelegramClient | None, max_messages: int = 15)
 HELP = ("<b>Commandes StockHunter</b>\n/today — dernier rapport\n/top — classement du jour\n"
         "/watchlist — actions en veille\n/scanner — opportunités de l'univers large\n/signal SYMBOLE — origine et "
         "résultat d'un signal\n/portfolio — portefeuille simulé\n/analyse SYMBOLE — synthèse sourcée "
-        "d'une action (ex. /analyse MA)\n/status — état du système\n\n"
+        "d'une action (ex. /analyse MA)\n/status — état du système\n"
+        "/global — classement mondial\n/europe · /usa · /asia — classement par région\n/country FR — par pays\n\n"
         "<i>Réponse en quelques secondes quand le serveur Railway est actif ; sinon au prochain envoi planifié.</i>")
 
 
@@ -253,14 +254,26 @@ def answer(engine: Engine, cmd: str) -> str:
         title = "Classement (READY / DEVELOPING)" if cmd == "/top" else "Veille (WATCHLIST)"
         body = "\n".join(f"• <b>{e(sym)}</b> {tot:.0f}/100 {st} · {c:.2f} $" for tot, st, c, sym in rows) or "Aucune action."
         return f"<b>{title}</b> — clôture du {run.as_of.strftime('%d/%m/%Y')}\n{body}\n\n<i>Informatif : aucune stratégie validée.</i>"
+    if cmd in ("/global", "/europe", "/usa", "/asia"):
+        from stockhunter.world import markets as wm
+        from stockhunter.world.telegram import ranking_message
+        if cmd == "/global":
+            return ranking_message(engine, title="Classement mondial")
+        region = wm.REGION_ALIASES[cmd[1:]][0]
+        return ranking_message(engine, region=region, title=f"Classement — {region}")
+    if cmd == "/country":
+        from stockhunter.world.telegram import country_message
+        return country_message(engine, parts[1] if len(parts) > 1 else None)
     if cmd == "/portfolio":
+        from stockhunter.world.telegram import portfolio_message
         pf = paper.summary(engine)
         lines = [f"• {e(p['symbol'])} {p['shares']:g} @ {p['entry']:.2f} → {p['last'] or 0:.2f} ({p['unrealized']:+.0f} $)"
                  for p in pf["positions"]] or ["Aucune position ouverte."]
         wr = "N/D" if pf["win_rate"] is None else f"{pf['win_rate']:.0%}"
         return (f"<b>Portefeuille simulé</b>\nValeur {amount(pf['equity'])} $ · réalisé {money(pf['realized'])} $ · "
                 f"latent {money(pf['unrealized'])} $\nTrades clos : {pf['closed']} · gagnants {wr}\n"
-                + "\n".join(lines) + "\n\n<i>Simulation, distincte de tout portefeuille réel.</i>")
+                + "\n".join(lines) + "\n\n<i>Simulation, distincte de tout portefeuille réel.</i>\n\n"
+                + portfolio_message(engine))
     if cmd == "/status":
         with session_scope(engine) as s:
             jobs = s.execute(select(JobRun.job_name, JobRun.status, JobRun.started_at)
@@ -347,6 +360,16 @@ def run_notifications(engine: Engine, settings: Settings, kind: str, now: dateti
         text, as_of = build_report(engine, kind, now)
         key = f"report:{kind}:{as_of if kind == 'evening' else paris.date()}"
         out["rapport"] = "mis en file" if enqueue(engine, f"report_{kind}", key, text) else "déjà envoyé (dédupliqué)"
+        if kind == "evening":                          # 3.2 : résumé mondial, une fois par séance US (anti-spam)
+            try:
+                from stockhunter.world.run import KV_STATE, kv_get
+                from stockhunter.world.telegram import daily_summary
+                if not (kv_get(engine, KV_STATE) or {}).get("scanners"):
+                    raise LookupError("aucun scanner mondial exécuté")
+                out["monde"] = ("mis en file" if enqueue(engine, "report_world", f"report:world:{as_of}",
+                                                         daily_summary(engine)) else "déjà envoyé (dédupliqué)")
+            except Exception as exc:                   # le résumé mondial ne bloque jamais le rapport US
+                out["monde"] = f"indisponible : {type(exc).__name__}"
     out["alertes_trading"] = enqueue_trade_events(engine)
     out["alertes_catalyseurs"] = enqueue_catalyst_alerts(engine)
     out["alertes_systeme"] = enqueue_system_alerts(engine, now)

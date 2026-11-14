@@ -101,6 +101,24 @@ def test_outcomes_follow_each_signal_to_its_end(engine, panel):
     assert perf["momentum"]["finalises"] > 0 and "insuffisant" in perf["momentum"]["lecture"]
 
 
+def test_unit_risk_notional_does_not_change_r_multiples(tmp_path, panel):
+    """3.2 : le notionnel du suivi unitaire (1 000 000 $) n'est qu'une convention d'arrondi ; les R publiés sont
+    identiques (à 0,001 R près : arrondi de la demi-position au TP1) avec un notionnel 1 000 fois plus grand."""
+    from stockhunter.db.session import get_engine
+    from stockhunter.db.models import Base
+    out = []
+    for k, notional in enumerate((dstore.UNIT_RISK, dstore.UNIT_RISK * 1000)):
+        eng = get_engine(f"sqlite:///{tmp_path / f'u{k}.db'}")
+        Base.metadata.create_all(eng)
+        past = panel.truncate(panel.close.index[-70])
+        dstore.save(eng, disc.run(past))
+        dstore.update_outcomes(eng, panel, unit_risk=notional)
+        with session_scope(eng) as s:
+            out.append(sorted((r.candidate_id, r.status, None if r.r_multiple is None else round(r.r_multiple, 3))
+                              for r in s.scalars(select(DiscoveryOutcome))))
+    assert out[0] == out[1] and out[0]
+
+
 class FakeSec:
     def __init__(self, filed):
         self.calls, self.filed = [], filed

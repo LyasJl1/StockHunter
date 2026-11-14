@@ -1,0 +1,60 @@
+name: Sondage des sources mondiales
+
+# Vérifie, en LECTURE SEULE et avec un seul appel par URL, l'accessibilité de sources de données mondiales
+# gratuites (statut HTTP, type, taille, premières lignes). Aucune donnée n'est conservée ni publiée.
+on:
+  workflow_dispatch:
+  push:
+    branches: [stockhunter-v3-2]
+    paths: ["docs/ops/probes/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 15
+    env:
+      SH_TIINGO_API_KEY: ${{ secrets.SH_TIINGO_API_KEY }}
+      SH_STOOQ_API_KEY: ${{ secrets.SH_STOOQ_API_KEY }}
+    steps:
+      - name: Sondage
+        run: |
+          UA="StockHunter-research/1.0 (personal, non-commercial)"
+          probe() {
+            name="$1"; url="$2"
+            code=$(curl -sS -L -A "$UA" -o body -w "%{http_code} %{content_type} %{size_download}" --max-time 60 "$url" || echo "ERR")
+            echo "### $name"; echo "$code"
+            (file body; head -c 400 body | tr -c '[:print:]\n' '.'; echo) 2>/dev/null | head -8
+          }
+          # Sondage 2 : couverture détaillée des sources accessibles au sondage 1
+          probe "ECB toutes devises (1 obs.)" "https://data-api.ecb.europa.eu/service/data/EXR/D..EUR.SP00.A?lastNObservations=1&format=csvdata"
+          python3 -c "
+          import csv; r=list(csv.DictReader(open('body'))); print('ECB devises :', sorted(x['CURRENCY'] for x in r), r[0]['TIME_PERIOD'] if r else None)" || true
+          probe "Euronext liste actions" "https://live.euronext.com/en/pd_es/data/stocks/download?mics=dm_all_stock"
+          python3 -c "
+          import csv,collections
+          lines=open('body',encoding='utf-8-sig').read().splitlines()
+          rows=list(csv.reader(lines[4:],delimiter=';'))
+          c=collections.Counter((r[3],r[4]) for r in rows if len(r)>12)
+          print('Euronext lignes', len(rows)); print('Euronext marche x devise :', c.most_common(40))
+          d=collections.Counter(r[14][:11] for r in rows if len(r)>14); print('dates de cloture :', d.most_common(5))
+          v=sum(1 for r in rows if len(r)>12 and r[13] not in ('','-')); print('avec cloture :', v)" || true
+          probe "NSE bhavcopy 13/11" "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261113_F_0000.csv.zip"
+          if file body | grep -q Zip; then unzip -p body | head -3; unzip -p body | wc -l; fi
+          probe "NSE bhavcopy 13/11/2024 (archive)" "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20241113_F_0000.csv.zip"
+          probe "BSE bhavcopy 13/11" "https://www.bseindia.com/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_20261113_F_0000.CSV"
+          probe "HKEX cotations du jour 13/11" "https://www.hkex.com.hk/eng/stat/smstat/dayquot/d261113e.htm"
+          probe "JPX page listes" "https://www.jpx.co.jp/english/markets/statistics-equities/misc/01.html"
+          grep -o 'href="[^"]*\.xls[x]*"' body | head -3 || true
+          probe "ASX societes cotees" "https://www.asx.com.au/asx/research/ASXListedCompanies.csv"
+          probe "Tiingo EOD 600519 (Shanghai)" "https://api.tiingo.com/tiingo/daily/600519/prices?startDate=2026-11-01&token=$SH_TIINGO_API_KEY"
+          probe "Tiingo tickers supportes" "https://apimedia.tiingo.com/docs/tiingo/daily/supported_tickers.zip"
+          if [ -s body ] && file body | grep -q Zip; then unzip -p body | python3 -c "
+          import csv,sys,collections
+          r=[x for x in csv.DictReader(sys.stdin) if x['assetType']=='Stock']
+          c=collections.Counter(x['exchange'] for x in r); a=collections.Counter(x['exchange'] for x in r if x['endDate']>='2026-11-01')
+          print('Tiingo actions par bourse (total, actives) :', [(k,v,a[k]) for k,v in c.most_common()])
+          print('devises :', collections.Counter(x['priceCurrency'] for x in r).most_common(15))"; fi

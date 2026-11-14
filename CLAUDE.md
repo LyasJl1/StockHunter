@@ -10,6 +10,8 @@ Moteur autonome de recherche, d'analyse, de validation et de suivi d'opportunit�
 4. Point-in-time : une analyse au jour J n'utilise que `filed_date <= J` (fondamentaux) et `bar_date < J` si J n'est pas clôturé.
 5. Un score n'est pas une probabilité. Ne jamais écrire « 85 % de chances ».
 6. Couverture honnête : l'univers suivi = `stockhunter/universe/us_seed.csv` (limité par les quotas), pas « tout le marché ».
+   Marchés mondiaux : seules les places du registre (`stockhunter/world/markets.py`) marquées « cours quotidiens »
+   sont couvertes ; une place sans source gratuite fiable reste « indisponible ».
 7. Les fixtures de test sont **synthétiques** (`tests/fixtures.py`, symboles `ZZ*`) et ne vont jamais en production.
 8. Secrets uniquement via variables d'environnement `SH_*`. Jamais dans le code, les logs, les messages, le cache.
 9. Aucune ressource payante sans accord explicite d'Ilias.
@@ -50,6 +52,9 @@ Méthode détaillée : `docs/scoring.md`. Protocole de backtest et résultats : 
   lab/                 laboratoire v3 : univers dynamique, facteurs, évaluation robuste, ML purgé, registre.json
   discovery/           moteur de découverte (univers large) : catégories, analyse approfondie, suivi des signaux
   pipeline.py          chaîne nocturne ; un échec critique fait échouer le job (plus de `|| echo warning`)
+  world/               3.2 : registre des places, fournisseurs (Euronext, NSE, BSE, BCE), stockage Parquet
+                       (var/world, hors base), change point-in-time, scanners par place, classement mondial,
+                       portefeuille mondial simulé, réplication internationale pré-enregistrée
 StockHunter 3.0 : docs/v3/ (audit, architecture, rapport 2.0 → 3.0, mise en production).
 Phases 1 à 8 livrées (audit : docs/reports/2026-11-12-audit-final.md). Ancien plan : `risk/ portfolio/ notifications/ reports/ dashboard/`.
 Cycle d'une stratégie : RESEARCH → BACKTEST → OUT-OF-SAMPLE → PAPER → PROMOTED.
@@ -83,6 +88,7 @@ stockhunter history fetch|status    # historique long Tiingo en Parquet (hors ba
 stockhunter pipeline nightly        # chaîne complète ; sort en erreur si une étape critique échoue
 stockhunter discover run|status     # scanner de l'univers large + analyse approfondie + suivi des signaux
 stockhunter lab run|registry        # programme de recherche pré-enregistré ; registre des expériences
+stockhunter world markets|sync|scan|ranking|portfolio|replay|status   # 3.2 : marchés mondiaux
 SH_TEST_DATABASE_URL=postgresql://... pytest -m "not live"   # suite complète sur PostgreSQL
 pytest -m "not live"                # tests hors réseau
 pytest -m live                      # tests réels (clés requises)
@@ -102,6 +108,13 @@ pytest -m live                      # tests réels (clés requises)
 - Le workflow nocturne n'appelle que `stockhunter pipeline nightly` ; `tests/test_workflows.py` l'impose.
 - Rétention : uniquement des données techniques ; jamais prix, scans, signaux, trades, résultats, registre.
 - Rapport 3.1 : docs/v3/rapport-v3-1.md.
+
+## Marchés mondiaux (3.2)
+- Séance « terminée » = clôture + délai de publication de la place ; jamais de clôture d'une place mêlée à une
+  séance future d'une autre. Change : dernier taux BCE publié ≤ date, devise absente = N/D.
+- Les cours mondiaux ne vont JAMAIS dans PostgreSQL (500 Mo) : Parquet `var/world` (cache Actions), budget 2 Go.
+- Aucune source contournée (anti-robot, clé, quota) ; licences : pas de redistribution, pas d'artefact.
+- Ajouter une place : `docs/v3-2/sources.md` (« Ajouter une place »). Conventions : `docs/v3-2/conventions.md`.
 
 ## Règles de recherche (v3)
 - Toute hypothèse est écrite dans docs/research/ et commitée AVANT d'être exécutée ; tout test va dans

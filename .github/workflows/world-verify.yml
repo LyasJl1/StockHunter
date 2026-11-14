@@ -1,0 +1,101 @@
+name: Monde — vérification réelle (branche 3.2)
+
+# Test RÉEL des places mondiales de la 3.2 sur une base SQLite jetable : collecte (BCE, Euronext, NSE, BSE),
+# stockage Parquet, référentiel, scanners, classement mondial, portefeuille simulé et rendu de la page Monde.
+# N'utilise AUCUN secret et n'écrit RIEN dans la base de production. Aucun artefact (licences : pas de
+# redistribution) ; seules des métriques et des symboles sont imprimés. Le cache (branche uniquement) permet de
+# reprendre la reconstitution de l'historique indien d'un passage à l'autre.
+on:
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: "séances d'historique indien à reconstituer"
+        default: "300"
+      max_files:
+        description: "fichiers au plus par place et par passage"
+        default: "320"
+  push:
+    branches: [stockhunter-v3-2]
+    paths: ["stockhunter/world/**", ".github/workflows/world-verify.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: world-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SH_DATABASE_URL: sqlite:///var-verify/verify.db
+      SH_WORLD_DIR: var-verify/world
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: Restaurer le stockage mondial de vérification
+        uses: actions/cache/restore@v5
+        with:
+          path: var-verify
+          key: world-verify-${{ github.run_id }}
+          restore-keys: world-verify-
+      - name: Tests hors réseau
+        run: pytest -m "not live" -q tests/test_world.py
+      - name: Migrations (base jetable)
+        run: mkdir -p var-verify && stockhunter init-db
+      - name: Collecte réelle (BCE, Euronext, NSE, BSE)
+        id: sync
+        continue-on-error: true
+        run: |
+          stockhunter world sync --backfill ${{ inputs.backfill || '300' }} --max-files ${{ inputs.max_files || '320' }}
+      - name: Scanners par place
+        id: scan
+        continue-on-error: true
+        run: stockhunter world scan
+      - name: Réplication internationale pré-enregistrée (docs/research/2026-11-14-preenregistrement-international.md)
+        run: stockhunter world replay --markets XNSE
+      - name: Classement mondial, portefeuille, état
+        # base jetable : rien n'est écrit en production ; une erreur ici rend le job rouge (pas de masquage)
+        run: |
+          stockhunter world ranking --top 20
+          stockhunter world ranking --top 10 --region Europe
+          stockhunter world ranking --top 10 --country IN
+          stockhunter world portfolio --base EUR
+          stockhunter world portfolio --base USD
+          stockhunter world status
+      - name: Rendu de la page Monde et commandes Telegram (sans envoi)
+        run: |
+          python - <<'EOF'
+          import re
+          from fastapi.testclient import TestClient
+          from stockhunter.config import get_settings
+          from stockhunter.dashboard.app import create_app
+          from stockhunter.dashboard.auth import hash_password
+          from stockhunter.db.session import get_engine
+          from stockhunter.notifications.engine import answer
+          s = get_settings(); e = get_engine(s.database_url)
+          app = create_app(e, s, secret="v" * 48, password_hash=hash_password("verif"), secure_cookies=False)
+          c = TestClient(app)
+          assert c.post("/login", data={"password": "verif"}, follow_redirects=False).status_code == 303
+          for q in ("", "?continent=Europe", "?country=IN", "?top=50&base=USD"):
+              r = c.get("/world" + q)
+              rows = len(re.findall(r'<td class="r">\d+</td>\s*<td>', r.text))
+              print(f"/world{q} : HTTP {r.status_code}, {len(r.text)} octets, {rows} lignes de classement")
+          for cmd in ("/global", "/europe", "/asia", "/country FR", "/country IN", "/country GB", "/portfolio"):
+              print(cmd, "->", answer(e, cmd).splitlines()[0][:120])
+          EOF
+      - name: Sauvegarder le stockage mondial de vérification
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: var-verify
+          key: world-verify-${{ github.run_id }}
+      - name: Échec si la collecte ou les scanners ont planté
+        if: always() && (steps.sync.outcome == 'failure' || steps.scan.outcome == 'failure')
+        run: |
+          echo "::warning::Collecte ou scanner en alerte (code 2) : voir les annotations ci-dessus."
