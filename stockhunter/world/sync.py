@@ -118,6 +118,11 @@ def sync_india(store: WorldStore, engine: Engine | None, fetch: pv.Fetcher, code
                backfill_sessions: int = 5, max_files: int = 40) -> Report:
     now = now or datetime.now(timezone.utc)
     m, rep = mk.get(code), Report(code)
+    if not mk._india_enabled(code):
+        rep.status = "rien à faire"
+        rep.detail = ("collecte NSE/BSE suspendue : droits de collecte, stockage et simulation non vérifiés ; "
+                      "aucune requête envoyée")
+        return rep
     url = pv.nse_url if code == "XNSE" else pv.bse_url
     targets = india_targets(m, store, now, backfill_sessions)
     if not targets:

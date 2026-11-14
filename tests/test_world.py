@@ -41,7 +41,7 @@ def test_registry_covers_all_target_markets_honestly():
         assert m.region in mk.REGIONS and len(m.currency) == 3 and len(m.country) == 2
         datetime(2026, 1, 1, tzinfo=__import__("zoneinfo").ZoneInfo(m.tz))       # fuseau valide
     priced = {m.code for m in mk.with_prices()}
-    assert priced == {"US", "XNSE", "XBOM"}                    # 3.2.1 : Euronext non autorisé par défaut
+    assert priced == {"US"}  # Euronext, NSE, BSE : indisponibles par défaut
     assert mk.get("XPAR").data == mk.NOT_AUTHORIZED
     assert mk.get("XLON").data == mk.NONE and mk.get("XSHG").data == mk.QUOTA      # pas de couverture prétendue
 
@@ -184,7 +184,8 @@ def test_parse_ecb():
 
 
 # ============================================================================ 9. et 10. données manquantes, périmées
-def test_missing_file_old_vs_recent(store, engine):
+def test_missing_file_old_vs_recent(store, engine, monkeypatch):
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")  # simulations réseau uniquement
     def get(url):
         return (404, b"", "") if "20261112" in url or "20261113" in url else \
             (200, bhavcopy(_url_date(url), [
@@ -367,10 +368,35 @@ def test_fetcher_retries_then_recovers_and_never_bypasses_antibot():
     assert html.calls == 1                                            # aucune tentative de contournement
 
 
-def test_blocked_source_stops_after_three_failures(store, engine):
+def test_blocked_source_stops_after_three_failures(store, engine, monkeypatch):
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")  # endpoint fictif
     f = pv.Fetcher(get=lambda u: (403, b"", ""), min_interval_s=0, sleep=lambda s: None)
     rep = sync.sync_india(store, engine, f, "XNSE", datetime(2026, 11, 14, 12, tzinfo=UTC), backfill_sessions=30)
     assert f.calls == 3 and rep.status == "échec" and "interrompue" in rep.errors[-1]
+
+
+# ============================================================================ 18. licences et isolation des pannes par région
+def test_india_disabled_by_default_even_when_explicitly_requested(store, engine, monkeypatch):
+    for key in ("SH_WORLD_NSE_AUTHORIZED", "SH_WORLD_BSE_AUTHORIZED"):
+        monkeypatch.delenv(key, raising=False)
+    assert wr._active_scanned() == ()
+    calls = []
+    fetch = pv.Fetcher(get=lambda url: calls.append(url) or (500, b"", ""),
+                       min_interval_s=0, sleep=lambda _: None, retries=0)
+    monkeypatch.setattr(sync, "sync_fx", lambda _store, _fetch: sync.Report("FX-BCE"))
+    assert wr.collect(engine, store, fetch, datetime(2026, 11, 14, 12, tzinfo=UTC),
+                      markets=("XNSE", "XBOM")) == 0
+    assert not calls  # zéro accès NSE/BSE, même pour une demande explicite
+    state = wr.kv_get(engine, wr.KV_STATE)["collecte"]["places"]
+    assert all("suspendue" in state[c]["detail"] for c in ("XNSE", "XBOM"))
+    assert not any(store.stored_sessions(c) for c in ("XNSE", "XBOM"))
+
+
+def test_india_flags_are_separate(monkeypatch):
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")
+    monkeypatch.delenv("SH_WORLD_BSE_AUTHORIZED", raising=False)
+    assert mk._india_enabled("XNSE") and not mk._india_enabled("XBOM")
+    assert "XNSE" in wr._active_scanned() and "XBOM" not in wr._active_scanned()
 
 
 # ============================================================================ 18. isolation des pannes par région
@@ -384,6 +410,7 @@ def test_euronext_not_collected_without_authorization(store, engine):
 
 def test_region_failure_isolation(store, engine, monkeypatch):
     monkeypatch.setenv("SH_WORLD_EURONEXT_ENABLED", "true")    # cas d'une autorisation obtenue
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")  # NSE simulé par le test
     def get(url):
         if "euronext" in url:
             raise ConnectionError("réseau")
@@ -401,7 +428,8 @@ def test_region_failure_isolation(store, engine, monkeypatch):
 
 
 # ============================================================================ 19. quotas et stockage
-def test_storage_immutable_budget_and_file_cap(tmp_path, engine):
+def test_storage_immutable_budget_and_file_cap(tmp_path, engine, monkeypatch):
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")  # endpoint fictif
     st = WorldStore(tmp_path / "w", budget_mb=1000)
     df = pd.DataFrame([{**_row("XPAR", "ZZA", "ZZFR00000001"), "date": D}])
     assert st.write_session("XPAR", D, df, "t") and not st.write_session("XPAR", D, df.assign(close=1.0), "t")
