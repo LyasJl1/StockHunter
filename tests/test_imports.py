@@ -174,3 +174,14 @@ def test_world_telegram_opportunity_and_trade_messages():
          "sortie": "2026-11-10", "motif": "stop touché", "rendement": -0.031, "pnl_base": -312.4, "r": -1.02}
     tm = trade_message(t, "EUR")
     assert "−" in tm or "-3.1 %" in tm and "-1.02 R" in tm and "Simulation" in tm
+
+
+def test_status_text_and_market_table_work_on_combined_store(tmp_path, engine):
+    from tests.world_fixtures import synth_market
+    primary, istore = WorldStore(tmp_path / "w"), im.ImportStore(tmp_path / "w" / "imports")
+    synth_market(istore, "XETR", 5, 3)
+    c = im.CombinedStore(primary, istore)
+    txt = wr.status_text(engine, c)
+    assert "Stockage mondial" in txt
+    row = {r["code"]: r for r in wr.market_table(engine, c)}["XETR"]
+    assert row["seances"] == 5 and c.status()["imports"]["XETR"]["seances"] == 5

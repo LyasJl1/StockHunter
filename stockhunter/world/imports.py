@@ -356,6 +356,20 @@ class CombinedStore:
     def has(self, market, d):
         return self.primary.has(market, d) or (self.imports is not None and self.imports.has(market, d))
 
+    # occupation et état : ceux du stockage principal (les imports sont sous sa racine)
+    def usage_mb(self) -> float:
+        return self.primary.usage_mb()
+
+    @property
+    def budget_mb(self) -> float:
+        return self.primary.budget_mb
+
+    def status(self) -> dict:
+        st = self.primary.status()
+        if self.imports is not None:
+            st["imports"] = {k: v for k, v in self.imports.status()["places"].items()}
+        return st
+
 
 @dataclass
 class ImportReport:
