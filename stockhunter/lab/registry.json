@@ -43,7 +43,7 @@
    "p_ajustees": {
     "p": 0.1547,
     "holm": 1.0,
-    "bh": 0.3745
+    "bh": 0.4162
    }
   },
   {
@@ -65,7 +65,7 @@
    "p_ajustees": {
     "p": 0.0762,
     "holm": 1.0,
-    "bh": 0.3354
+    "bh": 0.4162
    }
   },
   {
@@ -86,7 +86,7 @@
    "p_ajustees": {
     "p": 0.1114,
     "holm": 1.0,
-    "bh": 0.3745
+    "bh": 0.4162
    }
   },
   {
@@ -108,7 +108,7 @@
    "p_ajustees": {
     "p": 0.174,
     "holm": 1.0,
-    "bh": 0.3745
+    "bh": 0.4162
    }
   },
   {
@@ -150,7 +150,7 @@
    "p_ajustees": {
     "p": 0.2996,
     "holm": 1.0,
-    "bh": 0.5243
+    "bh": 0.516
    }
   },
   {
@@ -171,7 +171,7 @@
    "p_ajustees": {
     "p": 0.658,
     "holm": 1.0,
-    "bh": 0.8128
+    "bh": 0.8636
    }
   },
   {
@@ -192,7 +192,7 @@
    "p_ajustees": {
     "p": 0.567,
     "holm": 1.0,
-    "bh": 0.7442
+    "bh": 0.8139
    }
   },
   {
@@ -222,7 +222,7 @@
    "p_ajustees": {
     "p": 0.1784,
     "holm": 1.0,
-    "bh": 0.3745
+    "bh": 0.4162
    }
   },
   {
@@ -252,7 +252,7 @@
    "p_ajustees": {
     "p": 0.0722,
     "holm": 1.0,
-    "bh": 0.3354
+    "bh": 0.4162
    }
   },
   {
@@ -283,7 +283,7 @@
    "p_ajustees": {
     "p": 0.0543,
     "holm": 1.0,
-    "bh": 0.3354
+    "bh": 0.4162
    }
   },
   {
@@ -313,7 +313,7 @@
    "p_ajustees": {
     "p": 0.0793,
     "holm": 1.0,
-    "bh": 0.3354
+    "bh": 0.4162
    }
   },
   {
@@ -343,7 +343,7 @@
    "p_ajustees": {
     "p": 0.7812,
     "holm": 1.0,
-    "bh": 0.8634
+    "bh": 0.9114
    }
   },
   {
@@ -373,7 +373,7 @@
    "p_ajustees": {
     "p": 0.2623,
     "holm": 1.0,
-    "bh": 0.5008
+    "bh": 0.516
    }
   },
   {
@@ -434,7 +434,7 @@
    "p_ajustees": {
     "p": 0.7633,
     "holm": 1.0,
-    "bh": 0.8634
+    "bh": 0.9114
    }
   },
   {
@@ -446,7 +446,7 @@
    "famille": "international",
    "sens_attendu": 1,
    "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
-   "code": "bbd9fc7",
+   "code": "674e081",
    "donnees": {
     "place": "XNSE",
     "premiere_date_signal": "2026-03-05",
@@ -454,14 +454,44 @@
    },
    "periode": "hors échantillon (règles jamais développées sur cette place)",
    "dates": 27,
-   "stat": 0.02118577437856148,
-   "t": 1.4474089116604096,
+   "stat": 0.06891084446953237,
+   "t": 1.0119099358433863,
    "decision": "NON RETENU",
    "holdout_consulte": false,
+   "historique": [
+    {
+     "id": "intl-XNSE-momentum",
+     "type": "test",
+     "programme": "3.2-international",
+     "date": "2026-11-14",
+     "hypothese": "Catégorie « Momentum » (moteur 3.0.0 figé) sur XNSE : écart net à 20 séances vs univers de la place",
+     "famille": "international",
+     "sens_attendu": 1,
+     "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
+     "code": "bbd9fc7",
+     "donnees": {
+      "place": "XNSE",
+      "premiere_date_signal": "2026-03-05",
+      "derniere_date_signal": "2026-10-07"
+     },
+     "periode": "hors échantillon (règles jamais développées sur cette place)",
+     "dates": 27,
+     "stat": 0.02118577437856148,
+     "t": 1.4474089116604096,
+     "decision": "NON RETENU",
+     "holdout_consulte": false,
+     "p_ajustees": {
+      "p": 0.0799,
+      "holm": 1.0,
+      "bh": 0.3354
+     }
+    }
+   ],
+   "motif_reexecution": "3.2.1 : correction d'un look-ahead du rejeu (troncature des discontinuités et seuils de change calculés sur tout l'historique, y compris futur) ; même protocole, mêmes paramètres",
    "p_ajustees": {
-    "p": 0.0799,
+    "p": 0.1604,
     "holm": 1.0,
-    "bh": 0.3354
+    "bh": 0.4162
    }
   },
   {
@@ -473,7 +503,7 @@
    "famille": "international",
    "sens_attendu": 1,
    "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
-   "code": "bbd9fc7",
+   "code": "674e081",
    "donnees": {
     "place": "XNSE",
     "premiere_date_signal": "2026-03-05",
@@ -481,14 +511,44 @@
    },
    "periode": "hors échantillon (règles jamais développées sur cette place)",
    "dates": 30,
-   "stat": 0.013540460004986586,
-   "t": 0.9469327880308404,
+   "stat": 0.017313564348988675,
+   "t": 0.6066190081124194,
    "decision": "NON RETENU",
    "holdout_consulte": false,
+   "historique": [
+    {
+     "id": "intl-XNSE-breakout",
+     "type": "test",
+     "programme": "3.2-international",
+     "date": "2026-11-14",
+     "hypothese": "Catégorie « Sortie de consolidation » (moteur 3.0.0 figé) sur XNSE : écart net à 20 séances vs univers de la place",
+     "famille": "international",
+     "sens_attendu": 1,
+     "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
+     "code": "bbd9fc7",
+     "donnees": {
+      "place": "XNSE",
+      "premiere_date_signal": "2026-03-05",
+      "derniere_date_signal": "2026-10-07"
+     },
+     "periode": "hors échantillon (règles jamais développées sur cette place)",
+     "dates": 30,
+     "stat": 0.013540460004986586,
+     "t": 0.9469327880308404,
+     "decision": "NON RETENU",
+     "holdout_consulte": false,
+     "p_ajustees": {
+      "p": 0.1757,
+      "holm": 1.0,
+      "bh": 0.3745
+     }
+    }
+   ],
+   "motif_reexecution": "3.2.1 : correction d'un look-ahead du rejeu (troncature des discontinuités et seuils de change calculés sur tout l'historique, y compris futur) ; même protocole, mêmes paramètres",
    "p_ajustees": {
-    "p": 0.1757,
+    "p": 0.2744,
     "holm": 1.0,
-    "bh": 0.3745
+    "bh": 0.516
    }
   },
   {
@@ -500,7 +560,7 @@
    "famille": "international",
    "sens_attendu": 1,
    "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
-   "code": "bbd9fc7",
+   "code": "674e081",
    "donnees": {
     "place": "XNSE",
     "premiere_date_signal": "2026-03-05",
@@ -508,14 +568,44 @@
    },
    "periode": "hors échantillon (règles jamais développées sur cette place)",
    "dates": 27,
-   "stat": 0.0015631308358607788,
-   "t": 0.14469354245194305,
+   "stat": -0.022653989780129342,
+   "t": -1.693328951926914,
    "decision": "NON RETENU",
    "holdout_consulte": false,
+   "historique": [
+    {
+     "id": "intl-XNSE-steady",
+     "type": "test",
+     "programme": "3.2-international",
+     "date": "2026-11-14",
+     "hypothese": "Catégorie « Tendance régulière à faible risque » (moteur 3.0.0 figé) sur XNSE : écart net à 20 séances vs univers de la place",
+     "famille": "international",
+     "sens_attendu": 1,
+     "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
+     "code": "bbd9fc7",
+     "donnees": {
+      "place": "XNSE",
+      "premiere_date_signal": "2026-03-05",
+      "derniere_date_signal": "2026-10-07"
+     },
+     "periode": "hors échantillon (règles jamais développées sur cette place)",
+     "dates": 27,
+     "stat": 0.0015631308358607788,
+     "t": 0.14469354245194305,
+     "decision": "NON RETENU",
+     "holdout_consulte": false,
+     "p_ajustees": {
+      "p": 0.443,
+      "holm": 1.0,
+      "bh": 0.6202
+     }
+    }
+   ],
+   "motif_reexecution": "3.2.1 : correction d'un look-ahead du rejeu (troncature des discontinuités et seuils de change calculés sur tout l'historique, y compris futur) ; même protocole, mêmes paramètres",
    "p_ajustees": {
-    "p": 0.443,
+    "p": 0.9488,
     "holm": 1.0,
-    "bh": 0.6202
+    "bh": 0.9494
    }
   },
   {
@@ -527,7 +617,7 @@
    "famille": "international",
    "sens_attendu": 1,
    "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
-   "code": "bbd9fc7",
+   "code": "674e081",
    "donnees": {
     "place": "XNSE",
     "premiere_date_signal": "2026-03-05",
@@ -535,14 +625,44 @@
    },
    "periode": "hors échantillon (règles jamais développées sur cette place)",
    "dates": 29,
-   "stat": 0.003635928504803541,
-   "t": 0.1785470509079708,
+   "stat": -0.006473518557324219,
+   "t": -0.2072392052223375,
    "decision": "NON RETENU",
    "holdout_consulte": false,
+   "historique": [
+    {
+     "id": "intl-XNSE-shock",
+     "type": "test",
+     "programme": "3.2-international",
+     "date": "2026-11-14",
+     "hypothese": "Catégorie « Choc d'information » (moteur 3.0.0 figé) sur XNSE : écart net à 20 séances vs univers de la place",
+     "famille": "international",
+     "sens_attendu": 1,
+     "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
+     "code": "bbd9fc7",
+     "donnees": {
+      "place": "XNSE",
+      "premiere_date_signal": "2026-03-05",
+      "derniere_date_signal": "2026-10-07"
+     },
+     "periode": "hors échantillon (règles jamais développées sur cette place)",
+     "dates": 29,
+     "stat": 0.003635928504803541,
+     "t": 0.1785470509079708,
+     "decision": "NON RETENU",
+     "holdout_consulte": false,
+     "p_ajustees": {
+      "p": 0.4298,
+      "holm": 1.0,
+      "bh": 0.6202
+     }
+    }
+   ],
+   "motif_reexecution": "3.2.1 : correction d'un look-ahead du rejeu (troncature des discontinuités et seuils de change calculés sur tout l'historique, y compris futur) ; même protocole, mêmes paramètres",
    "p_ajustees": {
-    "p": 0.4298,
+    "p": 0.5813,
     "holm": 1.0,
-    "bh": 0.6202
+    "bh": 0.8139
    }
   },
   {
@@ -554,7 +674,7 @@
    "famille": "international",
    "sens_attendu": 1,
    "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
-   "code": "bbd9fc7",
+   "code": "674e081",
    "donnees": {
     "place": "XNSE",
     "premiere_date_signal": "2026-03-05",
@@ -562,14 +682,44 @@
    },
    "periode": "hors échantillon (règles jamais développées sur cette place)",
    "dates": 30,
-   "stat": 0.002735317943502268,
-   "t": 0.35753122412741634,
+   "stat": 0.008711340653521334,
+   "t": 0.47427040937939113,
    "decision": "NON RETENU",
    "holdout_consulte": false,
+   "historique": [
+    {
+     "id": "intl-XNSE-watch",
+     "type": "test",
+     "programme": "3.2-international",
+     "date": "2026-11-14",
+     "hypothese": "Catégorie « À surveiller » (moteur 3.0.0 figé) sur XNSE : écart net à 20 séances vs univers de la place",
+     "famille": "international",
+     "sens_attendu": 1,
+     "protocole": "docs/research/2026-11-14-preenregistrement-international.md",
+     "code": "bbd9fc7",
+     "donnees": {
+      "place": "XNSE",
+      "premiere_date_signal": "2026-03-05",
+      "derniere_date_signal": "2026-10-07"
+     },
+     "periode": "hors échantillon (règles jamais développées sur cette place)",
+     "dates": 30,
+     "stat": 0.002735317943502268,
+     "t": 0.35753122412741634,
+     "decision": "NON RETENU",
+     "holdout_consulte": false,
+     "p_ajustees": {
+      "p": 0.3616,
+      "holm": 1.0,
+      "bh": 0.5842
+     }
+    }
+   ],
+   "motif_reexecution": "3.2.1 : correction d'un look-ahead du rejeu (troncature des discontinuités et seuils de change calculés sur tout l'historique, y compris futur) ; même protocole, mêmes paramètres",
    "p_ajustees": {
-    "p": 0.3616,
+    "p": 0.3194,
     "holm": 1.0,
-    "bh": 0.5842
+    "bh": 0.516
    }
   }
  ],
@@ -610,6 +760,27 @@
    "duree_s": null,
    "memoire_max_mo": null,
    "resume": "XNSE : 5 catégories NON RETENU (t de 0,14 à 1,45 < 3,0) ; dates de signal 05/03 → 07/10/2026"
+  },
+  {
+   "programme": "3.2-international",
+   "date": "2026-11-14",
+   "commit": "674e081",
+   "workflow_run": 43618799710,
+   "tests": [
+    "intl-XNSE-momentum",
+    "intl-XNSE-breakout",
+    "intl-XNSE-steady",
+    "intl-XNSE-shock",
+    "intl-XNSE-watch"
+   ],
+   "donnees": {
+    "seances": 30,
+    "titres": null,
+    "empreinte": "XNSE"
+   },
+   "duree_s": null,
+   "memoire_max_mo": null,
+   "resume": "XNSE : momentum NON RETENU, breakout NON RETENU, steady NON RETENU, shock NON RETENU, watch NON RETENU"
   }
  ],
  "notes": [

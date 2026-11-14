@@ -114,6 +114,11 @@ pytest -m live                      # tests réels (clés requises)
   séance future d'une autre. Change : dernier taux BCE publié ≤ date, devise absente = N/D.
 - Les cours mondiaux ne vont JAMAIS dans PostgreSQL (500 Mo) : Parquet `var/world` (cache Actions), budget 2 Go.
 - Aucune source contournée (anti-robot, clé, quota) ; licences : pas de redistribution, pas d'artefact.
+- 3.2.1 : toute simulation multi-places passe par le moteur événementiel (`world/portfolio.py`) : une décision
+  n'utilise que l'information publiée à son instant (clôtures passées, taux BCE après 16 h CET). Tout ajout doit
+  ajouter un cas aux tests de perturbation (`tests/test_world_portfolio.py`).
+- Euronext : collecte automatique interdite par les conditions d'euronext.com sans autorisation écrite ; désactivée
+  (`SH_WORLD_EURONEXT_ENABLED`). Archive durable des séances non reconstituables : table `world_archive`.
 - Ajouter une place : `docs/v3-2/sources.md` (« Ajouter une place »). Conventions : `docs/v3-2/conventions.md`.
 
 ## Règles de recherche (v3)
