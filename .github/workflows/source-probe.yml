@@ -29,16 +29,32 @@ jobs:
             echo "### $name"; echo "$code"
             (file body; head -c 400 body | tr -c '[:print:]\n' '.'; echo) 2>/dev/null | head -8
           }
-          probe "stooq csv sans cle (SAP.DE)" "https://stooq.com/q/d/l/?s=sap.de&i=d"
-          [ -n "$SH_STOOQ_API_KEY" ] && probe "stooq csv avec cle (SAP.DE)" "https://stooq.com/q/d/l/?s=sap.de&i=d&apikey=$SH_STOOQ_API_KEY" || echo "### stooq : pas de cle SH_STOOQ_API_KEY"
-          probe "stooq bulk (page)" "https://stooq.com/db/h/"
-          probe "ECB taux de change (USD, 5 obs.)" "https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A?lastNObservations=5&format=csvdata"
-          probe "Xetra instruments negociables" "https://www.xetra.com/resource/blob/1528/28b4d3e5e7b6d1a5c6d3a5c9e0e1c7a2/data/t7-xetr-allTradableInstruments.csv"
+          # Sondage 2 : couverture détaillée des sources accessibles au sondage 1
+          probe "ECB toutes devises (1 obs.)" "https://data-api.ecb.europa.eu/service/data/EXR/D..EUR.SP00.A?lastNObservations=1&format=csvdata"
+          python3 -c "
+          import csv; r=list(csv.DictReader(open('body'))); print('ECB devises :', sorted(x['CURRENCY'] for x in r), r[0]['TIME_PERIOD'] if r else None)" || true
           probe "Euronext liste actions" "https://live.euronext.com/en/pd_es/data/stocks/download?mics=dm_all_stock"
-          probe "JPX liste des emetteurs" "https://www.jpx.co.jp/english/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_e.xls"
-          probe "NSE liste actions" "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
+          python3 -c "
+          import csv,collections
+          lines=open('body',encoding='utf-8-sig').read().splitlines()
+          rows=list(csv.reader(lines[4:],delimiter=';'))
+          c=collections.Counter((r[3],r[4]) for r in rows if len(r)>12)
+          print('Euronext lignes', len(rows)); print('Euronext marche x devise :', c.most_common(40))
+          d=collections.Counter(r[14][:11] for r in rows if len(r)>14); print('dates de cloture :', d.most_common(5))
+          v=sum(1 for r in rows if len(r)>12 and r[13] not in ('','-')); print('avec cloture :', v)" || true
+          probe "NSE bhavcopy 13/11" "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261113_F_0000.csv.zip"
+          if file body | grep -q Zip; then unzip -p body | head -3; unzip -p body | wc -l; fi
+          probe "NSE bhavcopy 13/11/2024 (archive)" "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20241113_F_0000.csv.zip"
+          probe "BSE bhavcopy 13/11" "https://www.bseindia.com/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_20261113_F_0000.CSV"
+          probe "HKEX cotations du jour 13/11" "https://www.hkex.com.hk/eng/stat/smstat/dayquot/d261113e.htm"
+          probe "JPX page listes" "https://www.jpx.co.jp/english/markets/statistics-equities/misc/01.html"
+          grep -o 'href="[^"]*\.xls[x]*"' body | head -3 || true
+          probe "ASX societes cotees" "https://www.asx.com.au/asx/research/ASXListedCompanies.csv"
+          probe "Tiingo EOD 600519 (Shanghai)" "https://api.tiingo.com/tiingo/daily/600519/prices?startDate=2026-11-01&token=$SH_TIINGO_API_KEY"
           probe "Tiingo tickers supportes" "https://apimedia.tiingo.com/docs/tiingo/daily/supported_tickers.zip"
           if [ -s body ] && file body | grep -q Zip; then unzip -p body | python3 -c "
           import csv,sys,collections
-          r=csv.DictReader(sys.stdin); c=collections.Counter((x['exchange'],x['assetType']) for x in r)
-          print('Tiingo bourses x types :', c.most_common(25))"; fi
+          r=[x for x in csv.DictReader(sys.stdin) if x['assetType']=='Stock']
+          c=collections.Counter(x['exchange'] for x in r); a=collections.Counter(x['exchange'] for x in r if x['endDate']>='2026-11-01')
+          print('Tiingo actions par bourse (total, actives) :', [(k,v,a[k]) for k,v in c.most_common()])
+          print('devises :', collections.Counter(x['priceCurrency'] for x in r).most_common(15))"; fi
