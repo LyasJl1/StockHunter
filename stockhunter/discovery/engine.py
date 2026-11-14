@@ -55,7 +55,7 @@ def _last(df: pd.DataFrame, d) -> pd.Series:
     return df.loc[d]
 
 
-def market_overview(p: Panel, mask: pd.DataFrame, tier: pd.DataFrame, d) -> dict[str, Any]:
+def market_overview(p: Panel, mask: pd.DataFrame, tier: pd.DataFrame, d, bench_label: str = "SPY") -> dict[str, Any]:
     c = p.close
     m = mask.loc[d]
     n = int(m.sum())
@@ -93,21 +93,24 @@ def market_overview(p: Panel, mask: pd.DataFrame, tier: pd.DataFrame, d) -> dict
     hostile = spy_ok is False and breadth is not None and breadth < 0.40
     out["regime"] = ("DÉFAVORABLE" if hostile else
                      "FAVORABLE" if spy_ok and breadth is not None and breadth >= 0.55 else "NEUTRE")
-    out["motif_regime"] = (f"SPY {'au-dessus' if spy_ok else 'sous' if spy_ok is False else 'N/D vs'} sa moyenne 200 jours ; "
+    out["motif_regime"] = (f"{bench_label} {'au-dessus' if spy_ok else 'sous' if spy_ok is False else 'N/D vs'} sa moyenne 200 jours ; "
                            f"{breadth:.0%} des titres au-dessus de leur moyenne 50 jours" if breadth is not None else "N/D")
     return out
 
 
 def run(p: Panel, names: dict[str, str] | None = None, filt: UniverseFilter = UniverseFilter(),
-        rules: Rules = Rules(), validation: dict[str, str] | None = None) -> dict[str, Any]:
-    """Classement de la dernière séance du panel. `validation` : id d'expérience -> décision (registre)."""
+        rules: Rules = Rules(), validation: dict[str, str] | None = None, ccy: str = "$",
+        bench_label: str = "SPY") -> dict[str, Any]:
+    """Classement de la dernière séance du panel. `validation` : id d'expérience -> décision (registre).
+    `ccy` et `bench_label` : symbole de la devise de cotation et nom de la référence de marché (3.2 : places hors
+    États-Unis) ; les valeurs par défaut gardent à l'identique les sorties du marché américain."""
     names, validation = names or {}, validation or {}
     d = p.close.index[-1]
     mask = universe_mask(p, filt)
     tier = liquidity_tier(p, mask)
     facs = fx.compute(p, mask)
     m = mask.loc[d]
-    overview = market_overview(p, mask, tier, d)
+    overview = market_overview(p, mask, tier, d, bench_label)
     c, i = p.close, len(p.close) - 1
     last, raw = c.loc[d], p.raw_close.loc[d]
     sma50, sma200 = c.rolling(50, min_periods=50).mean().loc[d], c.rolling(200, min_periods=200).mean().loc[d]
@@ -162,7 +165,7 @@ def run(p: Panel, names: dict[str, str] | None = None, filt: UniverseFilter = Un
                 entry["candidats"].append(_card(t, rank, float(sc), key, d, names, raw, last, atr14, atr_pct, r1, r3, r6,
                                                 spy3, ext50, sma50, sma200, med_dv, tier, rk, hist, listed20,
                                                 watch_level if key == "watch" else bo_level,
-                                                shock_day, shock_open, gap, rules))
+                                                shock_day, shock_open, gap, rules, ccy, bench_label))
             total += len(entry["candidats"])
         categories[key] = entry
     conclusion = ("Aucune configuration ne remplit les règles aujourd'hui." if total == 0 else
@@ -175,7 +178,8 @@ def run(p: Panel, names: dict[str, str] | None = None, filt: UniverseFilter = Un
 
 
 def _card(t, rank, score, key, d, names, raw, last, atr14, atr_pct, r1, r3, r6, spy3, ext50, sma50, sma200, med_dv, tier,
-          rk, hist, listed20, bo_level, shock_day, shock_open, gap, rules: Rules) -> dict[str, Any]:
+          rk, hist, listed20, bo_level, shock_day, shock_open, gap, rules: Rules, ccy: str = "$",
+          bench_label: str = "SPY") -> dict[str, Any]:
     f = lambda x: None if x is None or not np.isfinite(x) else float(x)
     scale = raw[t] / last[t]                                   # ajusté des splits -> cours réellement affiché
     close, atr_raw = float(raw[t]), float(atr14[t] * scale)
@@ -183,7 +187,7 @@ def _card(t, rank, score, key, d, names, raw, last, atr14, atr_pct, r1, r3, r6, 
     pct = lambda x: f"{x * 100:+.1f} %".replace(".", ",")
     pos, neg = [], []
     if f(r3[t]) is not None:
-        vs = f" ({pct(r3[t] - spy3)} vs SPY)" if np.isfinite(spy3) else ""
+        vs = f" ({pct(r3[t] - spy3)} vs {bench_label})" if np.isfinite(spy3) else ""
         (pos if r3[t] > 0 else neg).append(f"{pct(r3[t])} sur 3 mois{vs}")
     if f(r6[t]) is not None:
         (pos if r6[t] > 0 else neg).append(f"{pct(r6[t])} sur 6 mois")
@@ -192,12 +196,12 @@ def _card(t, rank, score, key, d, names, raw, last, atr14, atr_pct, r1, r3, r6, 
     if f(rk["V3"][t]) is not None and rk["V3"][t] >= 0.8:
         pos.append("Hausse propre au titre (au-delà du mouvement du marché)")
     if key == "breakout":
-        pos.append(f"Sortie par le haut d'une consolidation de 60 séances (niveau {bo_level[t] * scale:.2f} $), avec volume")
+        pos.append(f"Sortie par le haut d'une consolidation de 60 séances (niveau {bo_level[t] * scale:.2f} {ccy}), avec volume")
     if key == "shock" and pd.notna(shock_day[t]):
         pos.append(f"Ouverture en hausse de {pct(gap.at[shock_day[t], t])} le {shock_day[t]:%d/%m/%Y} sur volume ≥ 3× "
                    f"la normale ; écart conservé depuis")
     if key == "watch":
-        pos.append(f"À {pct(last[t] / bo_level[t] - 1)} de son plus haut de 60 séances ({bo_level[t] * scale:.2f} $), "
+        pos.append(f"À {pct(last[t] / bo_level[t] - 1)} de son plus haut de 60 séances ({bo_level[t] * scale:.2f} {ccy}), "
                    f"amplitude en contraction")
     if f(rk["H4"][t]) is not None and rk["H4"][t] <= 0.3:
         pos.append("Volatilité parmi les plus faibles de l'univers")
@@ -227,5 +231,5 @@ def _card(t, rank, score, key, d, names, raw, last, atr14, atr_pct, r1, r3, r6, 
                  "tp1": round(close + rules.tp1_r * pl.stop_offset, 2), "tp2": round(close + rules.tp2_r * pl.stop_offset, 2),
                  "ratio_rendement_risque": f"{rules.tp1_r:g} R (moitié) puis {rules.tp2_r:g} R",
                  "risque_pct": round(pl.stop_offset / close, 4), "horizon_seances": rules.max_sessions,
-                 "annulation": f"ouverture suivante hors de la zone {pl.entry_min:.2f}–{pl.entry_max:.2f} $"},
+                 "annulation": f"ouverture suivante hors de la zone {pl.entry_min:.2f}–{pl.entry_max:.2f} {ccy}"},
     }

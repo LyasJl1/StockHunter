@@ -171,3 +171,32 @@ def test_v3_pages_render_with_discovery_data(engine, client):
     c2 = TestClient(client.app)
     for path in ("/scanner", "/lab", "/system", f"/discover/{top}"):
         assert c2.get(path, follow_redirects=False).status_code == 303          # non connecté : redirection
+
+
+def test_world_page_markets_scanner_portfolio(engine, settings, tmp_path):
+    """3.2 : page Monde (données SYNTHÉTIQUES) — places, scanner mondial filtrable, portefeuille, fournisseurs."""
+    from datetime import date as _d
+    from stockhunter.world import run as wr
+    from stockhunter.world import scan as ws
+    from stockhunter.world.store import WorldStore
+    from tests.world_fixtures import fx_table, synth_market
+    settings.world_dir = str(tmp_path / "world")
+    st = WorldStore(settings.world_dir)
+    fx = fx_table(_d(2025, 1, 1), _d(2026, 11, 13))
+    st.save_fx(fx.wide.drop(columns="EUR").stack().rename("rate").reset_index()
+               .rename(columns={"level_0": "date", "currency": "currency"}).assign(date=lambda x: x["date"].dt.date))
+    synth_market(st, "XPAR", 260, 40, trend_first=12)
+    res = ws.scan_market(engine, st, "XPAR", fx)
+    assert wr.run_portfolio(engine, st, "EUR") == 0
+    app = create_app(engine, settings, secret="s" * 48, password_hash=hash_password(PW), secure_cookies=False)
+    c = TestClient(app)
+    assert c.get("/world", follow_redirects=False).status_code == 303           # authentification exigée
+    login(c)
+    page = c.get("/world").text
+    assert "Marchés mondiaux" in page and "Euronext Paris" in page and "aucune source gratuite fiable" in page
+    assert "London Stock Exchange" in page and "Santé par fournisseur" in page and "SIMULATION" in page
+    picks = [x["ticker"] for v in res["categories"].values() for x in v["candidats"]]
+    if picks:
+        assert picks[0] in page
+        assert picks[0] not in c.get("/world?country=IN").text                    # filtre par pays
+    assert c.get("/world?top=999&base=XXX").status_code == 200                   # paramètres invalides : défauts

@@ -46,10 +46,15 @@ NIGHTLY: tuple[Step, ...] = (
     Step("univers", "1 collecte", ("sync-universe",), False),
     Step("ingestion", "1 collecte", ("ingest", "all"), True),
     Step("marche_large", "1 collecte", ("market", "sync", "--max-calls", "4"), False),
+    Step("monde_collecte", "1 collecte", ("world", "sync"), False),         # Euronext, Inde, change BCE (isolés)
     Step("qualite", "2 qualité", ("quality",), False, warn_codes=(1, 2)),   # anomalies critiques : alerte, pas panne
     Step("scan", "3 indicateurs et sélection", ("scan", "--if-new", "--require-fresh"), True),
-    Step("decouverte", "3 indicateurs et sélection", ("discover", "run"), False),
+    # 3.2 : échec technique = rouge (critique) ; données absentes ou séance attendue manquante = alerte (code 2) ;
+    # aucune opportunité = succès (code 0, signalé comme tel)
+    Step("decouverte", "3 indicateurs et sélection", ("discover", "run"), True),
+    Step("monde_scanner", "3 indicateurs et sélection", ("world", "scan"), False),
     Step("paper", "4 décision simulée", ("paper", "run"), True),
+    Step("monde_portefeuille", "4 décision simulée", ("world", "portfolio"), False),
     Step("prospectif", "5 suivi des résultats", ("forward", "record"), False),
     Step("retention", "6 maintenance", ("prune", "--days", "30"), False),
     Step("notifications", "7 rapports", ("notify", "evening"), True),
@@ -57,20 +62,27 @@ NIGHTLY: tuple[Step, ...] = (
 
 
 def expected_session(now: datetime | None = None):
-    from zoneinfo import ZoneInfo
+    """Séance US attendue : clôture de New York + délai de publication des fournisseurs (3 h). Avant 3.2, la
+    séance du jour n'était jamais comptée : la collecte du soir était repoussée au lendemain matin."""
+    from stockhunter.world import markets as mk
+    return mk.last_completed_session(mk.get("US"), now)
 
-    from stockhunter.data.calendar import last_completed_session
-    now = now or datetime.now(timezone.utc)
-    return last_completed_session(now.astimezone(ZoneInfo("America/New_York")).date())
+
+def expected_sessions(now: datetime | None = None) -> dict[str, str]:
+    """Séance attendue de chaque place dotée de cours (États-Unis, Euronext, Inde)."""
+    from stockhunter.world import markets as mk
+    return mk.expected_sessions(now)
 
 
 def already_done(engine: Engine, now: datetime | None = None) -> str | None:
-    """Séance déjà entièrement traitée (chaîne terminée sans aucun échec ni étape partielle) : renvoie la séance."""
+    """Chaîne déjà terminée sans échec ni étape partielle pour la séance attendue de CHAQUE place : renvoie la
+    séance US. Un férié américain n'empêche donc plus la collecte d'une place européenne ou indienne ouverte."""
     with session_scope(engine) as s:
         kv = s.get(KeyValue, KV)
         last = json.loads(kv.value) if kv else None
     seance = str(expected_session(now))
-    if last and last.get("final") and last.get("status") == "success" and last.get("seance") == seance:
+    if (last and last.get("final") and last.get("status") == "success" and last.get("seance") == seance
+            and last.get("seances") == expected_sessions(now)):
         return seance
     return None
 
@@ -87,6 +99,7 @@ def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[lis
         print(f"Séance du {done} déjà entièrement traitée : rien à faire (relancer avec --force pour forcer).")
         return 0
     seance = str(expected_session(now))
+    seances = expected_sessions(now)
     started = datetime.now(timezone.utc)
     results: list[dict] = []
     with session_scope(engine) as s:
@@ -108,7 +121,8 @@ def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[lis
             jr.detail = detail or None
             if final:
                 jr.finished_at = datetime.now(timezone.utc)
-            payload = json.dumps({"started": started.isoformat(), "seance": seance, "status": status, "final": final,
+            payload = json.dumps({"started": started.isoformat(), "seance": seance, "seances": seances,
+                                  "status": status, "final": final,
                                   "steps": results},
                                  ensure_ascii=False)
             kv = s.get(KeyValue, KV)
@@ -150,4 +164,30 @@ def run(engine: Engine, steps: tuple[Step, ...] = NIGHTLY, runner: Callable[[lis
         mark = {"ok": "OK      ", "warning": "PARTIEL ", "failed": "ÉCHEC   "}[r["status"]]
         print(f"  {mark} {r['name']:14} {r['seconds']:>7.1f} s  {'(critique) ' if r['critical'] else ''}{r.get('error', '')}")
     print(f"Statut global : {status}")
+    _github_report(results, status, seances)
     return 1 if status == "failed" else 0
+
+
+def _github_report(results: list[dict], status: str, seances: dict) -> None:
+    """3.2 : rend les échecs visibles dans GitHub Actions (annotations + résumé), en distinguant une panne
+    technique (erreur), une donnée manquante ou partielle (avertissement) et une journée sans opportunité (succès)."""
+    import os
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    for r in results:
+        if r["status"] == "failed":
+            lvl = "error" if r["critical"] else "warning"
+            print(f"::{lvl} title=Étape {r['name']} en échec::{r.get('error', '')} — voir le journal de l'étape "
+                  f"« Chaîne nocturne » et la page Santé")
+        elif r["status"] == "warning":
+            print(f"::warning title=Étape {r['name']} partielle::{r.get('error') or 'données partielles ou absentes'}")
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    icon = {"ok": "✅", "warning": "⚠️", "failed": "❌"}
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"## Chaîne nocturne : {status}\n\nSéances attendues : "
+                + ", ".join(f"{k} {v}" for k, v in seances.items()) + "\n\n| Étape | Statut | Durée | Détail |\n|---|---|---|---|\n")
+        for r in results:
+            f.write(f"| {r['name']}{' (critique)' if r['critical'] else ''} | {icon[r['status']]} {r['status']} | "
+                    f"{r['seconds']} s | {r.get('error', '')} |\n")

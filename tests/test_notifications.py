@@ -217,3 +217,17 @@ def test_concurrent_workers_only_one_reads(engine, settings):
     for t in threads:
         t.join()
     assert sum(results.values()) == 1, results
+
+
+def test_world_telegram_commands(engine):
+    """3.2 : /global, /europe, /usa, /asia, /country, /portfolio (base vide : aucune ligne inventée)."""
+    from stockhunter.notifications.engine import answer
+    assert "Classement mondial" in answer(engine, "/global") and "Aucune sélection" in answer(engine, "/global")
+    assert "Europe" in answer(engine, "/europe") and "Amérique du Nord" in answer(engine, "/usa")
+    assert "Asie-Pacifique" in answer(engine, "/asia")
+    assert "Usage" in answer(engine, "/country")
+    assert "Royaume-Uni" in answer(engine, "/country gb") and "pas de cours gratuits" in answer(engine, "/country GB")
+    assert "France" in answer(engine, "/country FR")
+    assert "inconnu" in answer(engine, "/country QQ")
+    assert "Portefeuille mondial simulé" in answer(engine, "/portfolio")
+    assert "/global" in answer(engine, "/help")

@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     telegram_max_per_run: int = 15          # anti-spam : au-delà, les messages attendent le run suivant
     report_morning_hour_paris: int = 8      # rapport du matin, heure de Paris (changements d'heure gérés)
 
+    world_dir: str = "var/world"           # 3.2 : historique mondial (Parquet, hors base), segmenté place / séance
+    world_budget_mb: float = 2000.0        # plafond du stockage mondial (cache Actions : 10 Go au total)
+    world_backfill_sessions: int = 260     # profondeur de reconstitution de l'historique (Inde : archives publiques)
+    world_max_files: int = 40              # fichiers téléchargés au plus par place et par passage (cadence prudente)
     history_dir: str = "var/history"        # historique long (Parquet), hors base opérationnelle
     db_volume_mb: float = 500.0            # volume PostgreSQL (Railway gratuit : 500 Mo) pour les seuils 80/90/95 %
     # Espace du volume hors répertoire de données (métadonnées du système de fichiers, etc.). Calibré le 13/11/2026 :

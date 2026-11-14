@@ -57,10 +57,18 @@ def save(engine: Engine, result: dict[str, Any]) -> tuple[int, bool]:
 
 
 # ============================================================================ suivi du résultat de chaque signal
-def update_outcomes(engine: Engine, p: Panel, rules: Rules = Rules(), stale_sessions: int = 10) -> dict[str, int]:
+UNIT_RISK = 1_000_000.0
+
+
+def update_outcomes(engine: Engine, p: Panel, rules: Rules = Rules(), stale_sessions: int = 10,
+                    unit_risk: float = UNIT_RISK) -> dict[str, int]:
     """Rejoue, avec les règles de trading partagées, le plan figé de chaque candidat sur les séances parues depuis.
-    Suivi unitaire (risque fixe de 1 000 $ par signal, sans contrainte de portefeuille) : mesure la qualité de la
-    SÉLECTION. Un résultat final n'est plus jamais recalculé."""
+    Suivi unitaire, sans contrainte de portefeuille : mesure la qualité de la SÉLECTION, en multiples de R.
+    Convention (corrigée en 3.2 : la docstring annonçait 1 000 $ alors que le code utilisait 1 000 000 $) : risque
+    NOTIONNEL de `UNIT_RISK` = 1 000 000 $ par signal, choisi assez grand pour que l'arrondi à l'action entière
+    (TP1 vend la moitié arrondie à l'inférieur) soit négligeable. Les multiples de R, seuls publiés, ne dépendent
+    pas de ce notionnel (testé) ; ce n'est PAS le risque du portefeuille simulé (0,5 % du capital, paper.py).
+    Un résultat final n'est plus jamais recalculé."""
     sessions = p.close.index
     pos_of = {d.date(): i for i, d in enumerate(sessions)}
     fw20 = forward_returns(p, 20)
@@ -80,7 +88,7 @@ def update_outcomes(engine: Engine, p: Panel, rules: Rules = Rules(), stale_sess
                 continue
             scale = adj0 / card["signal_close"]               # unités du jour du signal -> unités ajustées actuelles
             pos = plan(adj0, card["atr"] * scale, rules)
-            size = lambda fill, off: (1_000_000.0 / off, None)   # risque fixe ; assez grand pour ne jamais tomber sous 1 action
+            size = lambda fill, off: (unit_risk / off, None)    # notionnel : voir la docstring
             last_seen = i0
             for i in range(i0 + 1, len(sessions)):
                 o, h, lo, cl = (p.open.at[sessions[i], t], p.high.at[sessions[i], t], p.low.at[sessions[i], t],

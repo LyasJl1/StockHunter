@@ -587,3 +587,111 @@ class DiscoveryDeep(Base):
     as_of: Mapped[date] = mapped_column(Date)
     payload: Mapped[str] = mapped_column(Text)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+# ============================================================================ 3.2 : marchés mondiaux
+class WorldListing(Base):
+    """Référentiel mondial : un listing = un titre (ISIN) sur une place. L'émetteur est identifié par l'ISIN (un
+    même ISIN coté sur deux places = une société, deux listings). Un titre plus coté n'est jamais supprimé :
+    `last_seen` reste figé et le statut passe à INACTIF. Les cours ne sont pas ici (Parquet, hors base)."""
+
+    __tablename__ = "world_listings"
+    __table_args__ = (UniqueConstraint("market", "isin", name="uq_world_listing"),
+                      Index("ix_world_listing_isin", "isin"), Index("ix_world_listing_ticker", "market", "ticker"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    market: Mapped[str] = mapped_column(String(8))           # code du registre (stockhunter/world/markets.py)
+    isin: Mapped[str] = mapped_column(String(12))
+    ticker: Mapped[str] = mapped_column(String(30))
+    name: Mapped[str | None] = mapped_column(String(255))
+    country: Mapped[str] = mapped_column(String(2))          # pays de la place (pas forcément celui de l'émetteur)
+    issuer_country: Mapped[str | None] = mapped_column(String(2))   # préfixe ISIN (pays d'émission du titre)
+    currency: Mapped[str] = mapped_column(String(3))
+    segment: Mapped[str | None] = mapped_column(String(30))
+    sector: Mapped[str | None] = mapped_column(String(80))   # N/D tant qu'aucune source gratuite ne le fournit
+    instrument: Mapped[str] = mapped_column(String(20), default="action")   # action | ADR | certificat
+    lot_size: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(10), default="ACTIF")        # ACTIF | INACTIF
+    first_seen: Mapped[date] = mapped_column(Date)
+    last_seen: Mapped[date] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(20))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class WorldTickerChange(Base):
+    """Historique des symboles : même ISIN sur la même place, symbole différent d'une séance à l'autre."""
+
+    __tablename__ = "world_ticker_changes"
+    __table_args__ = (UniqueConstraint("market", "isin", "changed_on", name="uq_world_ticker_change"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    market: Mapped[str] = mapped_column(String(8))
+    isin: Mapped[str] = mapped_column(String(12))
+    old_ticker: Mapped[str] = mapped_column(String(30))
+    new_ticker: Mapped[str] = mapped_column(String(30))
+    changed_on: Mapped[date] = mapped_column(Date)
+
+
+class WorldScan(Base):
+    """Scanner d'une place pour une séance (inséré une fois par place, séance et version ; jamais modifié)."""
+
+    __tablename__ = "world_scans"
+    __table_args__ = (UniqueConstraint("market", "as_of", "engine_version", name="uq_world_scan"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    market: Mapped[str] = mapped_column(String(8), index=True)
+    as_of: Mapped[date] = mapped_column(Date, index=True)
+    engine_version: Mapped[str] = mapped_column(String(20))
+    universe_size: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20))          # OK | HISTORIQUE_INSUFFISANT | AUCUNE_OPPORTUNITE
+    overview_json: Mapped[str] = mapped_column(Text)
+    conclusion: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorldSignal(Base):
+    """Sélection figée d'une place (fiche, plan simulé en devise locale, équivalents EUR et USD datés)."""
+
+    __tablename__ = "world_signals"
+    __table_args__ = (UniqueConstraint("scan_id", "isin", "category", name="uq_world_signal"),
+                      Index("ix_world_signal_isin", "isin", "as_of"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scan_id: Mapped[int] = mapped_column(ForeignKey("world_scans.id", ondelete="CASCADE"), index=True)
+    market: Mapped[str] = mapped_column(String(8))
+    as_of: Mapped[date] = mapped_column(Date)
+    isin: Mapped[str] = mapped_column(String(12))
+    ticker: Mapped[str] = mapped_column(String(30))
+    name: Mapped[str | None] = mapped_column(String(255))
+    category: Mapped[str] = mapped_column(String(20))
+    rank: Mapped[int] = mapped_column(Integer)
+    admitted: Mapped[int] = mapped_column(Integer)           # titres admis par la catégorie sur cette place ce jour
+    score: Mapped[float] = mapped_column(Float)
+    norm_score: Mapped[float] = mapped_column(Float)         # position relative dans sa place et sa catégorie (0-1)
+    currency: Mapped[str] = mapped_column(String(3))
+    close: Mapped[float] = mapped_column(Float)              # clôture locale de la séance (non « live »)
+    close_eur: Mapped[float | None] = mapped_column(Float)
+    close_usd: Mapped[float | None] = mapped_column(Float)
+    fx_date: Mapped[date | None] = mapped_column(Date)       # date du taux BCE utilisé
+    risk_pct: Mapped[float] = mapped_column(Float)           # distance du stop initial en % du cours
+    confidence: Mapped[float] = mapped_column(Float)
+    card_json: Mapped[str] = mapped_column(Text)
+
+
+class WorldOutcome(Base):
+    """Suivi d'une sélection mondiale (règles partagées, devise locale, puis conversion). Figé une fois final."""
+
+    __tablename__ = "world_outcomes"
+
+    signal_id: Mapped[int] = mapped_column(ForeignKey("world_signals.id", ondelete="CASCADE"), primary_key=True)
+    status: Mapped[str] = mapped_column(String(12))
+    final: Mapped[bool] = mapped_column(Boolean, default=False)
+    entry_date: Mapped[date | None] = mapped_column(Date)
+    exit_date: Mapped[date | None] = mapped_column(Date)
+    r_multiple: Mapped[float | None] = mapped_column(Float)
+    ret_20_local: Mapped[float | None] = mapped_column(Float)
+    ret_20_eur: Mapped[float | None] = mapped_column(Float)
+    fx_effect_eur: Mapped[float | None] = mapped_column(Float)
+    excess_20: Mapped[float | None] = mapped_column(Float)   # vs univers équipondéré de la place (devise locale)
+    detail: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
