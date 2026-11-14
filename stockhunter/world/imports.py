@@ -72,9 +72,13 @@ def sources_status() -> list[SourceStatus]:
     out = []
     out.append(SourceStatus("massive", True, "collecte automatique", "API officielle, plan gratuit (US)", ("US",)))
     out.append(SourceStatus("tiingo", True, "collecte automatique", "API officielle, plan gratuit (univers US suivi)", ("US",)))
-    out.append(SourceStatus("nse", True, "collecte automatique", "fichiers publics des archives NSE (conditions à "
-                            "confirmer par l'utilisateur)", ("XNSE",)))
-    out.append(SourceStatus("bse", True, "collecte automatique", "fichiers publics BSE (conditions à confirmer)", ("XBOM",)))
+    for name, code, reason in (
+        ("nse", "XNSE", "conditions NSE clauses 8–9 : extraction et simulation restreintes"),
+        ("bse", "XBOM", "conditions BSE : autorisation de collecte et simulation à confirmer"),
+    ):
+        enabled = mk._india_enabled(code)
+        out.append(SourceStatus(name, enabled, "collecte automatique" if enabled else "désactivée",
+                                "autorisation spécifique déclarée par l'exploitant" if enabled else reason, (code,)))
     out.append(SourceStatus("ecb", True, "collecte automatique", "réutilisation libre avec mention de la source", ()))
     eur = mk._euronext_enabled()
     out.append(SourceStatus("euronext", eur, "collecte automatique" if eur else "désactivée",

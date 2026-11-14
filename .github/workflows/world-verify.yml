@@ -1,10 +1,10 @@
 name: Monde — vérification réelle (branches 3.2.x)
 
-# Test RÉEL des places mondiales de la 3.2 sur une base SQLite jetable : collecte (BCE, Euronext, NSE, BSE),
+# Vérification sur base jetable : collecte BCE autorisée ; Inde et Euronext suspendues par défaut,
 # stockage Parquet, référentiel, scanners, classement mondial, portefeuille simulé et rendu de la page Monde.
 # N'utilise AUCUN secret et n'écrit RIEN dans la base de production. Aucun artefact (licences : pas de
 # redistribution) ; seules des métriques et des symboles sont imprimés. Le cache (branche uniquement) permet de
-# reprendre la reconstitution de l'historique indien d'un passage à l'autre.
+# garder un cache technique de test ; aucune collecte automatique des archives NSE/BSE.
 on:
   workflow_dispatch:
     inputs:
@@ -48,7 +48,7 @@ jobs:
         run: pytest -m "not live" -q tests/test_world.py
       - name: Migrations (base jetable)
         run: mkdir -p var-verify && stockhunter init-db
-      - name: Collecte réelle (BCE, Euronext, NSE, BSE)
+      - name: Collecte BCE et places disposant de droits confirmés
         # code 2 = dégradation temporaire (alerte visible, on continue) ; code 1 = échec critique (job ROUGE)
         run: |
           set +e
@@ -63,16 +63,10 @@ jobs:
           c=$?
           if [ $c -eq 2 ]; then echo "::warning title=Scanners mondiaux::dégradation (code 2)"; exit 0; fi
           exit $c
-      - name: Sauvegarde durable — archivage, perte simulée du cache, restauration, intégrité (données réelles NSE)
-        run: |
-          stockhunter world archive --markets XNSE --budget-mb 400
-          mv var-verify/world/bars/XNSE var-verify/xnse-perdu
-          stockhunter world restore --markets XNSE
-          stockhunter world archive-verify --markets XNSE
-          diff -r var-verify/xnse-perdu var-verify/world/bars/XNSE && echo "RESTAURATION IDENTIQUE OCTET POUR OCTET"
-          rm -rf var-verify/xnse-perdu
-      - name: Réplication internationale pré-enregistrée (docs/research/2026-11-14-preenregistrement-international.md)
-        run: stockhunter world replay --markets XNSE --compare-legacy
+      - name: Archivage et restauration — tests synthétiques hors réseau
+        run: pytest -m "not live" -q tests/test_world.py -k "archive"
+      - name: Rejeu historique — tests synthétiques hors réseau
+        run: pytest -m "not live" -q tests/test_world.py -k "replay"
       - name: Import d'historiques (mode recherche) — fichier d'EXEMPLE synthétique, aucune connexion Yahoo
         run: |
           mkdir -p var-verify/exemples

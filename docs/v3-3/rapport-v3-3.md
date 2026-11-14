@@ -15,15 +15,15 @@ GitHub Actions) · **production**.
 
 | Indicateur | Résultat vérifié |
 |---|---|
-| Fournisseurs utilisables | automatiques : Massive, Tiingo (US), NSE, BSE (Inde, conditions à confirmer), BCE (change) ; import de fichiers fournis par l'utilisateur. Désactivés automatiquement : Euronext, Yahoo |
+| Fournisseurs utilisables | automatiques : Massive, Tiingo (US), BCE (change) ; NSE/BSE désactivés par défaut en attente d’autorisation ; import de fichiers fournis par l'utilisateur. Désactivés automatiquement : Euronext, Yahoo |
 | Yahoo : faisabilité et conditions | **collecte automatique interdite** (conditions §2(d)(ix)) ; `yfinance` non officiel ; export CSV réservé à l'abonnement Gold. Importateur développé (exports Yahoo, CSV yfinance, format long) et testé sur fichiers d'exemple ; **aucun appel à Yahoo** |
-| Pays disponibles | **automatique** : États-Unis (production), Inde (réel, base jetable). **Import** : tout pays du registre doté d'un suffixe Yahoo (testé sur exemples : Allemagne, France, Royaume-Uni, Inde) |
-| Bourses disponibles | NYSE, Nasdaq, NYSE American (production) ; NSE, BSE (réel) ; autres places : seulement via fichiers importés |
+| Pays disponibles | **automatique** : États-Unis (production) ; Inde testée historiquement, mais collecte suspendue. **Import** : tout pays du registre doté d'un suffixe Yahoo (testé sur exemples : Allemagne, France, Royaume-Uni, Inde) |
+| Bourses disponibles | NYSE, Nasdaq, NYSE American (production) ; NSE/BSE testés historiquement, mais suspendus ; autres places par import |
 | Actions référencées | US : univers Massive ; NSE 4 055 ; BSE 7 919 (4 795 hors doublons NSE) |
-| Actions réellement analysables | US 2 725 ; NSE 487 ; BSE 1 (au 13/11/2026) |
+| Actions réellement analysables | US 2 725 ; NSE 487 / BSE 1 dans les anciens tests, non exploités automatiquement |
 | Profondeur de l'historique | US 2 ans ; Inde 300 séances (depuis le 25/08/2025) ; imports : celle des fichiers |
 | Mode recherche opérationnel | **oui, sur données réelles** (Inde, run 43629035593) ; import → scan en mode recherche → classement « recherche » vérifié de bout en bout sur un fichier d'exemple |
-| Mode surveillance opérationnel | US : **production** ; Inde : réel, en production après fusion des PR #6 et #7 ; aucune autre place autorisée |
+| Mode surveillance opérationnel | US : **production** ; Inde suspendue par défaut après fusion ; pas d’autre place en surveillance automatique |
 | Nombre de stratégies testées | 21 tests au registre (16 US + 5 catégories sur le NSE) |
 | Stratégies statistiquement validées | **aucune** (NSE : t ≤ 1,01 pour un seuil de 3,0) |
 | Portefeuille simulé | moteur événementiel 3.2.1 conservé (tests anti-look-ahead) ; ajouts : profit factor, rendement moyen par trade, résultats par stratégie et par pays ; rejeu NSE : −6,7 % en EUR contre +17,7 % pour l'indice équipondéré |
@@ -61,7 +61,7 @@ GitHub Actions) · **production**.
 - Sans fichier légitimement obtenu, aucune place hors US / Inde n'est couverte : Yahoo ne fournit pas d'export
   gratuit et interdit la collecte automatique ; Euronext l'interdit également.
 - Imports Yahoo : biais de survivance (radiés absents), pas d'ISIN, pas de secteur ni de capitalisation.
-- Conditions d'utilisation NSE / BSE non lues (page soumise à autorisation d'accès) : à confirmer.
+- NSE : conditions §8–9 consultées, collecte et simulation suspendues par défaut. BSE : droits non établis, collecte suspendue.
 - Bourse de Casablanca : aucun suffixe Yahoo connu, aucune source autorisée.
 
 ## Commits

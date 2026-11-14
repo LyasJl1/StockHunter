@@ -153,10 +153,13 @@ def test_combined_store_prefers_collected_sessions(tmp_path):
     assert np.allclose(got, a[a["date"] == pd.Timestamp(last)].sort_values("isin")["close"].to_numpy())
 
 
-def test_sources_status_disables_unauthorized_sources_and_no_yahoo_client():
+def test_sources_status_disables_unauthorized_sources_and_no_yahoo_client(monkeypatch):
+    monkeypatch.delenv("SH_WORLD_NSE_AUTHORIZED", raising=False)
+    monkeypatch.delenv("SH_WORLD_BSE_AUTHORIZED", raising=False)
     st = {s.name: s for s in im.sources_status()}
     assert not st["yahoo"].enabled and "2(d)(ix)" in st["yahoo"].reason
     assert not st["euronext"].enabled and st["import"].enabled and st["massive"].enabled
+    assert not st["nse"].enabled and not st["bse"].enabled
     assert "yfinance" not in sys.modules                                         # aucun client Yahoo chargé
 
 

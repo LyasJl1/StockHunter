@@ -67,6 +67,18 @@ _EURONEXT_DATA = "cours quotidiens" if _euronext_enabled() else "collecte automa
 INDIA_NOTE = ("Bhavcopy officiel quotidien (OHLC, volume, montant, cours de référence ajusté des opérations sur titres) ; "
               "archives publiques permettant de reconstituer l'historique.")
 
+
+def _india_enabled(code: str) -> bool:
+    """Contrôle explicite par bourse ; aucune collecte ni simulation NSE/BSE autorisée par défaut.
+
+    Exiger au préalable une autorisation couvrant collecte, archivage et backtests.
+    La variable d'environnement constitue une déclaration, pas une preuve de licence.
+    """
+    import os
+    key = {"XNSE": "SH_WORLD_NSE_AUTHORIZED", "XBOM": "SH_WORLD_BSE_AUTHORIZED"}.get(code)
+    return bool(key and os.environ.get(key, "").strip().lower() in ("1", "true", "yes", "oui"))
+
+
 MARKETS: dict[str, Market] = {m.code: m for m in [
     # ------------------------------------------------------------------ Amérique du Nord
     Market("US", "États-Unis (NYSE, Nasdaq, NYSE American)", "US", "États-Unis", "Amérique du Nord",
@@ -156,7 +168,8 @@ def get(code: str) -> Market:
 
 
 def with_prices() -> list[Market]:
-    return [m for m in MARKETS.values() if m.data == PRICES]
+    return [m for m in MARKETS.values() if m.data == PRICES and
+            (m.code not in ("XNSE", "XBOM") or _india_enabled(m.code))]
 
 
 # ============================================================================ calendrier et séances

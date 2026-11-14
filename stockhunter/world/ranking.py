@@ -109,6 +109,8 @@ def _world_rows(engine: Engine) -> list[Row]:
         latest = dict(s.execute(select(WorldScan.market, func.max(WorldScan.as_of)).group_by(WorldScan.market)).all())
         sectors = {}
         for market, as_of in latest.items():
+            if market in ("XNSE", "XBOM") and not mk._india_enabled(market):
+                continue  # aucun ancien signal republié sans droits
             m = mk.get(market)
             sigs = list(s.scalars(select(WorldSignal).join(WorldScan, WorldScan.id == WorldSignal.scan_id)
                                   .where(WorldScan.market == market, WorldScan.as_of == as_of)))

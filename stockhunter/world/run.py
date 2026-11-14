@@ -192,13 +192,13 @@ def research_markets(store) -> tuple[str, ...]:
 
 
 def scannable(store) -> tuple[str, ...]:
-    return tuple(SCANNED) + research_markets(store)
+    return _active_scanned() + research_markets(store)
 
 
 def stale_markets(engine: Engine, store: WorldStore, now: datetime | None = None, max_lag: int = 1) -> dict[str, str]:
     """Places dotées de cours dont les données ont plus de `max_lag` séance(s) de retard (place fermée : 0)."""
     out = {}
-    for code in SCANNED:
+    for code in _active_scanned():
         m = mk.get(code)
         stored = store.stored_sessions(code)
         if not stored:
@@ -207,6 +207,18 @@ def stale_markets(engine: Engine, store: WorldStore, now: datetime | None = None
         if f.lag is not None and f.lag > max_lag:
             out[code] = f"dernière séance {f.last}, attendue {f.expected} ({f.detail})"
     return out
+
+
+# ============================================================================ droits des places
+INDIA_MARKETS = ("XNSE", "XBOM")
+
+
+def _market_allowed(code: str) -> bool:
+    return code not in INDIA_MARKETS or mk._india_enabled(code)
+
+
+def _active_scanned() -> tuple[str, ...]:
+    return tuple(code for code in SCANNED if _market_allowed(code))
 
 
 # ============================================================================ scanners
@@ -222,6 +234,10 @@ def scan_all(engine: Engine, store: WorldStore, markets: tuple[str, ...] | None 
     stale = stale_markets(engine, store)
     research = set(research_markets(store))
     for code in markets or scannable(store):
+        if not _market_allowed(code):
+            out[code] = {"statut": "DESACTIVE", "detail": "droits de collecte et de simulation non confirmés"}
+            places[code] = (OK, "place désactivée par défaut (autorisation requise)")
+            continue
         try:
             res = ws.scan_market(engine, store, code, fx, validation)
             upd = ws.update_outcomes(engine, store, code, fx)
@@ -286,7 +302,7 @@ def load_signals(engine: Engine, store: WorldStore, fx: FxTable):
                   g.currency) for g, _st in rows]
         us = [(c.ticker, c.as_of, c.category, c.rank, json.loads(c.card_json)) for c in s.scalars(select(DiscoveryCandidate))]
     panels = {}
-    for code in {w[0] for w in world}:
+    for code in {w[0] for w in world if _market_allowed(w[0])}:
         p, _ = ws.build_market_panel(store, code, fx)
         if p is not None:
             panels[code] = p
@@ -415,13 +431,17 @@ def market_table(engine: Engine, store: WorldStore, now: datetime | None = None)
                "collecte": coll.get(m.code), "scanner": scans.get(m.code),
                "etat": _worst(((state.get("scanners") or {}).get("etats") or {}).get(m.code),
                               coll.get(m.code), coll.get(_EURONEXT_GROUP.get(m.code, "")))}
+        if m.code in INDIA_MARKETS and not _market_allowed(m.code):
+            row["donnees"] = mk.NOT_AUTHORIZED
+            row["note"] = m.note + " Collecte et simulation suspendues en attente de droits."
+            row["etat"] = "suspendu (autorisation requise)"
         if m.code == "US":
             row.update(seances=None, derniere=str(us_run.as_of) if us_run else None,
                        listings={"actifs": us_n, "principal": us_n},
                        scanner={"statut": "OK", "as_of": str(us_run.as_of) if us_run else None,
                                 "univers": us_run.universe_size if us_run else 0})
             last = us_run.as_of if us_run else None
-        if m.data == mk.PRICES:
+        if row["donnees"] == mk.PRICES:
             try:
                 f = mk.freshness(m, last, now)
                 row["fraicheur"] = f.detail
