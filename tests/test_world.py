@@ -442,3 +442,25 @@ def _rk_row(key, market, ticker, norm=0.8, name=None):
     return rk.Row(key=key, ticker=ticker, name=name, market=market, exchange=m.name, country=m.country, region=m.region,
                   continent=m.continent, currency=m.currency, as_of=str(D), close=10.0, close_eur=10.0, close_usd=11.0,
                   categories=["momentum"], norm=norm, risk_pct=0.05, risk="modéré", confidence=0.9)
+
+
+def test_replay_is_point_in_time_and_registered(store, tmp_path):
+    """Réplication pré-enregistrée : dates de signal tous les 5 jours, aucune écriture en base, registre complété."""
+    import shutil
+    from stockhunter.lab import registry as R
+    from stockhunter.world import replay as rp
+    fx = fx_table(date(2025, 1, 1), D)
+    synth_market(store, "XPAR", 200, 30)
+    res = rp.replay(store, "XPAR", fx)
+    assert res["statut"] == "OK" and res["dates_signal"] >= 9
+    assert set(res["categories"]) == set(__import__("stockhunter.discovery.engine", fromlist=["x"]).CATEGORIES)
+    assert all(c["decision"] == "NON TESTABLE" for c in res["categories"].values())    # < 20 dates
+    assert all(s.as_of <= D for s in res["signaux"])
+    reg = tmp_path / "registry.json"
+    shutil.copy(R.PATH, reg)
+    n0 = len(R.tests(R.load(reg)))
+    out = rp.register([res], {"date": "2026-11-14", "commit": "test"}, reg)
+    assert out["famille"] == n0 + 5
+    out = rp.register([res], {"date": "2026-11-14", "commit": "test"}, reg)       # réexécution : pas de doublon
+    assert out["famille"] == n0 + 5
+    assert rp.replay(WorldStore(tmp_path / "vide"), "XPAR", fx)["statut"] == "NON TESTABLE"

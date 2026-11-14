@@ -84,6 +84,10 @@ def collect(engine: Engine, store: WorldStore, fetch: pv.Fetcher | None = None, 
                          "places": {r.market: {"statut": r.status, "ecrites": len(r.written), "erreurs": r.errors[:3],
                                                "detail": r.detail} for r in reports},
                          "stockage": store.status()}
+    fx = store.load_fx()
+    if not fx.empty:                     # derniers taux BCE en base : le tableau de bord (Railway) n'a pas le Parquet
+        last = fx[fx["date"] >= max(fx["date"]) - pd.Timedelta(days=10)]
+        state["fx_recent"] = [[str(d), c, float(r)] for d, c, r in last[["date", "currency", "rate"]].itertuples(index=False)]
     _kv_set(engine, KV_STATE, state)
     print(f"Stockage mondial : {store.usage_mb():.1f} Mo / {store.budget_mb:.0f} Mo ; appels HTTP : {fetch.calls}")
     return 2 if bad else 0
@@ -241,12 +245,17 @@ def market_table(engine: Engine, store: WorldStore, now: datetime | None = None)
         from stockhunter.db.models import DiscoveryRun
         us_run = s.scalar(select(DiscoveryRun).order_by(DiscoveryRun.as_of.desc()).limit(1))
     out = []
+    remote = ((state.get("collecte") or {}).get("stockage") or {}).get("places", {})
     for m in mk.MARKETS.values():
         stored = store.stored_sessions(m.code)
         last = stored[-1] if stored else None
+        n_stored = len(stored)
+        if not stored and m.code in remote:            # tableau de bord sans stockage local : état consigné en base
+            n_stored = remote[m.code]["seances"]
+            last = pd.Timestamp(remote[m.code]["derniere"]).date() if remote[m.code]["derniere"] else None
         row = {"code": m.code, "nom": m.name, "pays": m.country_name, "region": m.region, "devise": m.currency,
                "donnees": m.data, "fournisseurs": ", ".join(m.providers) or "—", "note": m.note,
-               "seances": len(stored), "derniere": str(last) if last else None, "listings": cnt.get(m.code, {}),
+               "seances": n_stored, "derniere": str(last) if last else None, "listings": cnt.get(m.code, {}),
                "collecte": coll.get(m.code), "scanner": scans.get(m.code)}
         if m.code == "US":
             row.update(seances=None, derniere=str(us_run.as_of) if us_run else None,
@@ -263,6 +272,16 @@ def market_table(engine: Engine, store: WorldStore, now: datetime | None = None)
                 row["fraicheur"] = f"calendrier : {exc}"
         out.append(row)
     return out
+
+
+def fx_for_display(engine: Engine, store: WorldStore) -> FxTable:
+    """Taux BCE du stockage local, sinon derniers taux consignés en base (tableau de bord hébergé)."""
+    fx = store.load_fx()
+    if fx.empty:
+        rows = (kv_get(engine, KV_STATE) or {}).get("fx_recent") or []
+        fx = pd.DataFrame([{"date": pd.Timestamp(d).date(), "currency": c, "rate": r} for d, c, r in rows],
+                          columns=["date", "currency", "rate"])
+    return FxTable.from_long(fx)
 
 
 def status_text(engine: Engine, store: WorldStore) -> str:

@@ -57,6 +57,8 @@ jobs:
         id: scan
         continue-on-error: true
         run: stockhunter world scan
+      - name: Réplication internationale pré-enregistrée (docs/research/2026-11-14-preenregistrement-international.md)
+        run: stockhunter world replay --markets XNSE
       - name: Classement mondial, portefeuille, état
         # base jetable : rien n'est écrit en production ; une erreur ici rend le job rouge (pas de masquage)
         run: |

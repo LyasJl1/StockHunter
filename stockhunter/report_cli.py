@@ -489,6 +489,42 @@ def cmd_world(settings, engine, args) -> int:
         return wr.scan_all(engine, store, codes)
     if args.action == "portfolio":
         return wr.run_portfolio(engine, store, args.base)
+    if args.action == "replay":                      # étude pré-enregistrée : rien n'est écrit en base
+        import json as _json
+        from stockhunter.world import replay as rp
+        from stockhunter.world.fx import FxTable
+        from stockhunter.world.portfolio import GlobalConfig, benchmarks, simulate
+        fx = FxTable.from_long(store.load_fx())
+        out = []
+        for code in codes or ("XNSE",):
+            res = rp.replay(store, code, fx)
+            print(f"Réplication {code} : {res['statut']} — {res.get('dates_signal', 0)} dates de signal "
+                  f"({res.get('premiere')} → {res.get('derniere')})")
+            for k, c in res["categories"].items():
+                t = "N/D" if c["t"] is None else f"{c['t']:+.2f}"
+                ex = "N/D" if c["exces_net_moyen"] is None else f"{c['exces_net_moyen'] * 100:+.2f} %"
+                print(f"  {k:9} dates {c['dates']:3}  écart net moyen {ex:>9}  t(NW) {t:>6}  moitiés "
+                      f"{['N/D' if h is None else round(h * 100, 2) for h in c['moities']]}  -> {c['decision']}")
+            pf = {}
+            if res.get("signaux"):
+                p = res["panel"]
+                bars = {(code, k): __import__("pandas").DataFrame({c: getattr(p, c)[k] for c in ("open", "high", "low", "close")}).dropna()
+                        for k in {s.key for s in res["signaux"]}}
+                for base in ("EUR", "USD"):
+                    sim = simulate(res["signaux"], bars, fx, GlobalConfig(base=base))
+                    sm = sim.summary
+                    ref = benchmarks({f"équipondéré {code}": (p.bench, wm.get(code).currency)}, fx, base,
+                                     sm.get("debut"), sm.get("fin")) if sm.get("debut") else {}
+                    pf[base] = {**{k: sm.get(k) for k in ("rendement_total", "drawdown_max", "trades_clos", "gagnants",
+                                                         "r_moyen", "debut", "fin", "frais", "lecture")},
+                                "references": ref, "refus": len(sim.refused)}
+                    print(f"  portefeuille simulé ({base}) : {pf[base]}")
+            out.append({k: v for k, v in res.items() if k not in ("signaux", "panel")} | {"portefeuille": pf})
+        if args.json:
+            with open(args.json, "w") as fh:
+                _json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
+        print("RESULTATS_JSON " + _json.dumps(out, ensure_ascii=False, default=str))
+        return 0
     if args.action == "ranking":
         from stockhunter.world.fx import FxTable
         from stockhunter.world.ranking import global_ranking
@@ -641,7 +677,8 @@ def add_parsers(sub) -> dict:
     db.add_argument("--insecure-cookies", action="store_true", help="HTTP local uniquement (pas de HTTPS)")
     db.add_argument("--telegram-worker", action="store_true", help="répondre aux commandes Telegram en continu")
     wo = sub.add_parser("world", help="3.2 : marchés mondiaux (registre, collecte, scanners, classement, portefeuille)")
-    wo.add_argument("action", choices=["markets", "sync", "scan", "ranking", "portfolio", "status"])
+    wo.add_argument("action", choices=["markets", "sync", "scan", "ranking", "portfolio", "replay", "status"])
+    wo.add_argument("--json", help="replay : fichier de résultats")
     wo.add_argument("--markets", help="places (codes du registre, séparés par des virgules), défaut : toutes")
     wo.add_argument("--backfill", type=int, help="séances d'historique à reconstituer (défaut : réglage)")
     wo.add_argument("--max-files", type=int, help="fichiers au plus par place et par passage")

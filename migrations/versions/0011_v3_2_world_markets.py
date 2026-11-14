@@ -47,7 +47,7 @@ def upgrade() -> None:
     sa.Column('as_of', sa.Date(), nullable=False),
     sa.Column('engine_version', sa.String(length=20), nullable=False),
     sa.Column('universe_size', sa.Integer(), nullable=False),
-    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('status', sa.String(length=30), nullable=False),
     sa.Column('overview_json', sa.Text(), nullable=False),
     sa.Column('conclusion', sa.Text(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),

@@ -17,14 +17,13 @@ from stockhunter.discovery.engine import CATEGORIES
 from stockhunter.world import markets as mk
 from stockhunter.world import providers as pv
 from stockhunter.world import run as wr
-from stockhunter.world.fx import FxTable
 from stockhunter.world.ranking import TOP_CHOICES, global_ranking
 from stockhunter.world.store import WorldStore
 
 
 def world_view(engine: Engine, settings: Settings, f: dict) -> dict:
     store = WorldStore(settings.world_dir, settings.world_budget_mb)
-    fx = FxTable.from_long(store.load_fx())
+    fx = wr.fx_for_display(engine, store)
     try:
         top = int(f.get("top") or 20)
     except ValueError:
@@ -36,7 +35,10 @@ def world_view(engine: Engine, settings: Settings, f: dict) -> dict:
     port = {b: wr.kv_get(engine, f"{wr.KV_PORTFOLIO}_{b}") for b in ("EUR", "USD")}
     state = wr.kv_get(engine, wr.KV_STATE) or {}
     covered = [r for r in table if r["donnees"] == mk.PRICES]
-    return {"rank": rank, "markets": table, "port": port, "state": state, "storage": store.status(),
+    storage = store.status()
+    if not storage["places"] and (state.get("collecte") or {}).get("stockage"):
+        storage = state["collecte"]["stockage"]          # tableau de bord hébergé : état consigné par la chaîne
+    return {"rank": rank, "markets": table, "port": port, "state": state, "storage": storage,
             "providers": list(pv.PROVIDERS.values()), "top": top, "top_choices": TOP_CHOICES,
             "continents": sorted({m.continent for m in mk.MARKETS.values()}),
             "countries": sorted({(m.country, m.country_name) for m in mk.MARKETS.values() if m.data == mk.PRICES}),

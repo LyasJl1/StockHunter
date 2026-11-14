@@ -15,18 +15,16 @@ from stockhunter.world import run as wr
 MAX_LINES = 10
 
 
-def _fx():
+def _fx(engine: Engine):
     from stockhunter.config import get_settings
-    from stockhunter.world.fx import FxTable
     from stockhunter.world.store import WorldStore
-    st = WorldStore(get_settings().world_dir)
-    fx = FxTable.from_long(st.load_fx())
+    fx = wr.fx_for_display(engine, WorldStore(get_settings().world_dir))
     return None if fx.wide.empty else fx
 
 
 def ranking_message(engine: Engine, region: str | None = None, country: str | None = None, title: str = "") -> str:
     from stockhunter.world.ranking import global_ranking
-    res = global_ranking(engine, _fx(), top=MAX_LINES, region=region, country=country)
+    res = global_ranking(engine, _fx(engine), top=MAX_LINES, region=region, country=country)
     lines = []
     for r in res["lignes"]:
         eur = f" ≈ {r.close_eur:.2f} €" if r.close_eur and r.currency != "EUR" else ""

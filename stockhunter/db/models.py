@@ -643,7 +643,7 @@ class WorldScan(Base):
     as_of: Mapped[date] = mapped_column(Date, index=True)
     engine_version: Mapped[str] = mapped_column(String(20))
     universe_size: Mapped[int] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(20))          # OK | HISTORIQUE_INSUFFISANT | AUCUNE_OPPORTUNITE
+    status: Mapped[str] = mapped_column(String(30))          # OK | HISTORIQUE_INSUFFISANT | AUCUNE_OPPORTUNITE | ERREUR_DONNEES
     overview_json: Mapped[str] = mapped_column(Text)
     conclusion: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
