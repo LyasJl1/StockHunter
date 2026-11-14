@@ -41,7 +41,8 @@ def test_registry_covers_all_target_markets_honestly():
         assert m.region in mk.REGIONS and len(m.currency) == 3 and len(m.country) == 2
         datetime(2026, 1, 1, tzinfo=__import__("zoneinfo").ZoneInfo(m.tz))       # fuseau valide
     priced = {m.code for m in mk.with_prices()}
-    assert priced == {"US", "XPAR", "XAMS", "XBRU", "XLIS", "XDUB", "XMIL", "XOSL", "XNSE", "XBOM"}
+    assert priced == {"US"}  # Euronext, NSE, BSE : indisponibles par défaut
+    assert mk.get("XPAR").data == mk.NOT_AUTHORIZED
     assert mk.get("XLON").data == mk.NONE and mk.get("XSHG").data == mk.QUOTA      # pas de couverture prétendue
 
 
@@ -183,7 +184,8 @@ def test_parse_ecb():
 
 
 # ============================================================================ 9. et 10. données manquantes, périmées
-def test_missing_file_old_vs_recent(store, engine):
+def test_missing_file_old_vs_recent(store, engine, monkeypatch):
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")  # simulations réseau uniquement
     def get(url):
         return (404, b"", "") if "20261112" in url or "20261113" in url else \
             (200, bhavcopy(_url_date(url), [
@@ -366,14 +368,49 @@ def test_fetcher_retries_then_recovers_and_never_bypasses_antibot():
     assert html.calls == 1                                            # aucune tentative de contournement
 
 
-def test_blocked_source_stops_after_three_failures(store, engine):
+def test_blocked_source_stops_after_three_failures(store, engine, monkeypatch):
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")  # endpoint fictif
     f = pv.Fetcher(get=lambda u: (403, b"", ""), min_interval_s=0, sleep=lambda s: None)
     rep = sync.sync_india(store, engine, f, "XNSE", datetime(2026, 11, 14, 12, tzinfo=UTC), backfill_sessions=30)
     assert f.calls == 3 and rep.status == "échec" and "interrompue" in rep.errors[-1]
 
 
+# ============================================================================ 18. licences et isolation des pannes par région
+def test_india_disabled_by_default_even_when_explicitly_requested(store, engine, monkeypatch):
+    for key in ("SH_WORLD_NSE_AUTHORIZED", "SH_WORLD_BSE_AUTHORIZED"):
+        monkeypatch.delenv(key, raising=False)
+    assert wr._active_scanned() == ()
+    calls = []
+    fetch = pv.Fetcher(get=lambda url: calls.append(url) or (500, b"", ""),
+                       min_interval_s=0, sleep=lambda _: None, retries=0)
+    monkeypatch.setattr(sync, "sync_fx", lambda _store, _fetch: sync.Report("FX-BCE"))
+    assert wr.collect(engine, store, fetch, datetime(2026, 11, 14, 12, tzinfo=UTC),
+                      markets=("XNSE", "XBOM")) == 0
+    assert not calls  # zéro accès NSE/BSE, même pour une demande explicite
+    state = wr.kv_get(engine, wr.KV_STATE)["collecte"]["places"]
+    assert all("suspendue" in state[c]["detail"] for c in ("XNSE", "XBOM"))
+    assert not any(store.stored_sessions(c) for c in ("XNSE", "XBOM"))
+
+
+def test_india_flags_are_separate(monkeypatch):
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")
+    monkeypatch.delenv("SH_WORLD_BSE_AUTHORIZED", raising=False)
+    assert mk._india_enabled("XNSE") and not mk._india_enabled("XBOM")
+    assert "XNSE" in wr._active_scanned() and "XBOM" not in wr._active_scanned()
+
+
 # ============================================================================ 18. isolation des pannes par région
-def test_region_failure_isolation(store, engine):
+def test_euronext_not_collected_without_authorization(store, engine):
+    calls = []
+    fetch = pv.Fetcher(get=lambda u: calls.append(u) or (503, b"", ""), min_interval_s=0, sleep=lambda s: None, retries=0)
+    wr.collect(engine, store, fetch, datetime(2026, 11, 14, 12, tzinfo=UTC), markets=("XPAR",))
+    assert not [u for u in calls if "euronext" in u]
+    assert "non autorisée" in wr.kv_get(engine, wr.KV_STATE)["collecte"]["places"]["XPAR"]["detail"]
+
+
+def test_region_failure_isolation(store, engine, monkeypatch):
+    monkeypatch.setenv("SH_WORLD_EURONEXT_ENABLED", "true")    # cas d'une autorisation obtenue
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")  # NSE simulé par le test
     def get(url):
         if "euronext" in url:
             raise ConnectionError("réseau")
@@ -391,7 +428,8 @@ def test_region_failure_isolation(store, engine):
 
 
 # ============================================================================ 19. quotas et stockage
-def test_storage_immutable_budget_and_file_cap(tmp_path, engine):
+def test_storage_immutable_budget_and_file_cap(tmp_path, engine, monkeypatch):
+    monkeypatch.setenv("SH_WORLD_NSE_AUTHORIZED", "true")  # endpoint fictif
     st = WorldStore(tmp_path / "w", budget_mb=1000)
     df = pd.DataFrame([{**_row("XPAR", "ZZA", "ZZFR00000001"), "date": D}])
     assert st.write_session("XPAR", D, df, "t") and not st.write_session("XPAR", D, df.assign(close=1.0), "t")
@@ -472,3 +510,85 @@ def test_bse_scan_excludes_companies_listed_on_nse(store):
     synth_market(store, "XBOM", 30, 10, turnover_scale=5e9, isin_market="XNSE")   # mêmes ISIN : doublons
     p, info = ws.build_market_panel(store, "XBOM", fx)
     assert info["exclus_listing_principal"] == 10 and (p is None or p.close.shape[1] == 0)
+
+
+def test_replay_future_discontinuity_does_not_change_past_signals(tmp_path):
+    """3.2.1 : une discontinuité FUTURE ne tronque plus l'historique d'une date de signal passée (look-ahead 3.2)."""
+    from stockhunter.world import replay as rp
+    fx = fx_table(date(2025, 1, 1), D)
+    sigs = []
+    for k, jump in enumerate((False, True)):
+        st = WorldStore(tmp_path / f"w{k}")
+        ss = synth_market(st, "XPAR", 200, 30, trend_first=10)
+        if jump:
+            for d in ss[-8:]:
+                df = pd.read_parquet(st.path("XPAR", d))
+                df.loc[df["ticker"].isin(["ZZ00", "ZZ01", "ZZ02"]), ["open", "high", "low", "close"]] *= 3
+                df.to_parquet(st.path("XPAR", d), index=False)
+        res = rp.replay(st, "XPAR", fx)
+        cutoff = ss[-40]
+        sigs.append(sorted((s.as_of, s.key, s.category) for s in res["signaux"] if s.as_of <= cutoff))
+    assert sigs[0] == sigs[1] and sigs[0]
+
+
+# ============================================================================ 3.2.1 : sauvegarde durable
+def test_archive_push_verify_restore_roundtrip(tmp_path, engine):
+    import shutil
+    from stockhunter.world import archive as wa
+    st = WorldStore(tmp_path / "w")
+    ss = synth_market(st, "XPAR", 12, 15)
+    r = wa.push(engine, st)
+    assert r.archived == 12 and r.refused is None
+    assert wa.push(engine, st).archived == 0                                   # incrémental
+    v = wa.verify(engine, st)
+    assert v.verified == 12 and not v.mismatches and not v.missing_archive
+    before = {d: st.path("XPAR", d).read_bytes() for d in ss}
+    shutil.rmtree(tmp_path / "w")                                              # le cache Actions disparaît
+    fresh = WorldStore(tmp_path / "w")
+    rr = wa.restore(engine, fresh)
+    assert rr.restored == 12 and not rr.mismatches
+    again = WorldStore(tmp_path / "w")
+    assert again.stored_sessions("XPAR") == ss and all(again.path("XPAR", d).read_bytes() == before[d] for d in ss)
+    assert again.load("XPAR")["close"].notna().all()
+    # un fichier local altéré n'est jamais écrasé : divergence signalée
+    p = again.path("XPAR", ss[0])
+    p.write_bytes(p.read_bytes() + b"x")
+    assert wa.verify(engine, again).mismatches and wa.restore(engine, again).mismatches
+    assert p.read_bytes().endswith(b"x")
+
+
+def test_archive_respects_budget_and_never_deletes(tmp_path, engine):
+    from sqlalchemy import func, select
+    from stockhunter.db.models import WorldArchive
+    from stockhunter.world import archive as wa
+    st = WorldStore(tmp_path / "w")
+    synth_market(st, "XAMS", 10, 15)
+    r = wa.push(engine, st, budget_mb=0.02)
+    assert r.refused and "budget" in r.refused and r.archived < 10
+    n = r.archived
+    assert wa.push(engine, st).archived == 10 - n                             # reprise après interruption
+    with session_scope(engine) as s:
+        assert s.scalar(select(func.count()).select_from(WorldArchive)) == 10
+
+
+def test_collect_restores_lost_cache_before_collecting(tmp_path, engine):
+    import shutil
+    from stockhunter.world import archive as wa
+    st = WorldStore(tmp_path / "w")
+    synth_market(st, "XPAR", 5, 10)
+    wa.push(engine, st)
+    shutil.rmtree(tmp_path / "w")
+    fetch = pv.Fetcher(get=lambda u: (503, b"", ""), min_interval_s=0, sleep=lambda s: None, retries=0)
+    wr.collect(engine, WorldStore(tmp_path / "w"), fetch, datetime(2026, 11, 14, 12, tzinfo=UTC), markets=("XPAR",))
+    assert len(WorldStore(tmp_path / "w").stored_sessions("XPAR")) == 5
+
+
+def test_ranking_excludes_stale_markets(store, engine):
+    fx = fx_table(date(2025, 1, 1), D)
+    synth_market(store, "XPAR", 260, 40, trend_first=12)
+    res = ws.scan_market(engine, store, "XPAR", fx)
+    n = sum(len(v["candidats"]) for v in res["categories"].values())
+    fresh = rk.global_ranking(engine, now=datetime(2026, 11, 14, 12, tzinfo=UTC))
+    late = rk.global_ranking(engine, now=datetime(2026, 11, 20, 12, tzinfo=UTC))      # 5 séances plus tard
+    assert fresh["total"] == len({c["isin"] for v in res["categories"].values() for c in v["candidats"]}) and n
+    assert late["total"] == 0 and "XPAR" in late["exclues_perimees"]

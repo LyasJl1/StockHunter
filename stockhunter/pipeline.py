@@ -46,15 +46,17 @@ NIGHTLY: tuple[Step, ...] = (
     Step("univers", "1 collecte", ("sync-universe",), False),
     Step("ingestion", "1 collecte", ("ingest", "all"), True),
     Step("marche_large", "1 collecte", ("market", "sync", "--max-calls", "4"), False),
-    Step("monde_collecte", "1 collecte", ("world", "sync"), False),         # Euronext, Inde, change BCE (isolés)
+    # 3.2.1 : étapes mondiales CRITIQUES — code 1 (exception, données corrompues, toutes les places en panne) = rouge ;
+    # code 2 (publication retardée, source momentanément indisponible, données périmées) = alerte visible
+    Step("monde_collecte", "1 collecte", ("world", "sync"), True),          # Euronext, Inde, change BCE (isolés)
     Step("qualite", "2 qualité", ("quality",), False, warn_codes=(1, 2)),   # anomalies critiques : alerte, pas panne
     Step("scan", "3 indicateurs et sélection", ("scan", "--if-new", "--require-fresh"), True),
     # 3.2 : échec technique = rouge (critique) ; données absentes ou séance attendue manquante = alerte (code 2) ;
     # aucune opportunité = succès (code 0, signalé comme tel)
     Step("decouverte", "3 indicateurs et sélection", ("discover", "run"), True),
-    Step("monde_scanner", "3 indicateurs et sélection", ("world", "scan"), False),
+    Step("monde_scanner", "3 indicateurs et sélection", ("world", "scan"), True),
     Step("paper", "4 décision simulée", ("paper", "run"), True),
-    Step("monde_portefeuille", "4 décision simulée", ("world", "portfolio"), False),
+    Step("monde_portefeuille", "4 décision simulée", ("world", "portfolio"), True),
     Step("prospectif", "5 suivi des résultats", ("forward", "record"), False),
     Step("retention", "6 maintenance", ("prune", "--days", "30"), False),
     Step("notifications", "7 rapports", ("notify", "evening"), True),

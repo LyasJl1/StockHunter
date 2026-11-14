@@ -18,6 +18,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -695,3 +696,23 @@ class WorldOutcome(Base):
     excess_20: Mapped[float | None] = mapped_column(Float)   # vs univers équipondéré de la place (devise locale)
     detail: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class WorldArchive(Base):
+    """3.2.1 : copie DURABLE et indépendante du cache Actions des séances mondiales non reconstituables (Euronext).
+    Un fichier Parquet compressé par place et par séance, avec son empreinte SHA-256. Base privée : aucune
+    redistribution. Jamais supprimé (rétention illimitée, ≈ 30 Mo par an pour Euronext)."""
+
+    __tablename__ = "world_archive"
+    __table_args__ = (UniqueConstraint("market", "session", name="uq_world_archive"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    market: Mapped[str] = mapped_column(String(8), index=True)
+    session: Mapped[date] = mapped_column(Date)
+    provider: Mapped[str] = mapped_column(String(20))
+    rows: Mapped[int] = mapped_column(Integer)
+    nbytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    manifest_json: Mapped[str] = mapped_column(Text)        # entrée du manifeste (source, horodatage de collecte…)
+    blob: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

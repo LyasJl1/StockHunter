@@ -59,8 +59,19 @@ def _adjust_factors(long: pd.DataFrame) -> pd.Series:
     return after.reindex(long.index)
 
 
+def known_fx_dates(code: str, days: list[date]) -> list[date]:
+    """Pour chaque séance, date du dernier taux BCE PUBLIÉ à l'heure de clôture de la place (3.2.1) : à Mumbai
+    (clôture 10 h UTC), le taux du jour (publié à 16 h CET) n'est pas encore connu."""
+    from stockhunter.world.fx import ecb_known_date
+    from stockhunter.world.portfolio import session_times
+    times = session_times(code, days)
+    return [ecb_known_date(times[d][1]) for d in days]
+
+
 def build_market_panel(store: WorldStore, code: str, fx: FxTable, max_sessions: int = 400,
-                       end: date | None = None) -> tuple[Panel | None, dict[str, Any]]:
+                       end: date | None = None, truncate: bool = True) -> tuple[Panel | None, dict[str, Any]]:
+    """`end` : dernière séance utilisable (point-in-time). `truncate` : troncature à la dernière discontinuité
+    inexpliquée CONNUE à `end` (signal) ; False pour mesurer a posteriori un résultat (suivi, rendements futurs)."""
     m = mk.get(code)
     days = [d for d in store.stored_sessions(code) if end is None or d <= end][-max_sessions:]
     info: dict[str, Any] = {"place": code, "seances": len(days), "requises": MIN_SESSIONS,
@@ -90,12 +101,15 @@ def build_market_panel(store: WorldStore, code: str, fx: FxTable, max_sessions: 
     ret = frames["close"].pct_change(fill_method=None)
     bad = ret.abs() > jump
     last_bad = bad[::-1].cumsum()[::-1] > 0          # vrai sur et avant la dernière discontinuité
-    cut = last_bad & bad.any()
-    for k in frames:
-        frames[k] = frames[k].mask(cut)
-    info["titres_tronques"] = int(bad.any().sum())
+    if truncate:
+        cut = last_bad & bad.any()
+        for k in frames:
+            frames[k] = frames[k].mask(cut)
+    info["titres_tronques"] = int(bad.any().sum()) if truncate else 0
     try:
-        usd = fx.series(m.currency, "USD", idx)
+        kd = pd.DatetimeIndex(pd.to_datetime(known_fx_dates(code, days)))
+        uniq = fx.series(m.currency, "USD", kd.unique().sort_values())
+        usd = pd.Series(uniq.reindex(kd).to_numpy(), index=idx)                    # taux connu à la clôture
     except FxUnavailable as exc:
         info["erreur"] = str(exc)
         return None, info
@@ -103,6 +117,7 @@ def build_market_panel(store: WorldStore, code: str, fx: FxTable, max_sessions: 
     if dollar_vol.isna().all().all():
         dollar_vol = (frames["raw_close"] * frames["volume"]).mul(usd, axis=0)
     rets = frames["close"].pct_change(fill_method=None)
+    rets = rets.mask(rets.abs() > jump)              # variation inexpliquée exclue de l'indice (qualité, point-in-time)
     liquid = dollar_vol.rolling(20, min_periods=15).median() >= UniverseFilter().min_dollar_vol / 2
     ew = rets.where(liquid.shift(1, fill_value=False)).mean(axis=1).fillna(0.0)
     bench = (1 + ew).cumprod() * 100
@@ -116,13 +131,27 @@ def build_market_panel(store: WorldStore, code: str, fx: FxTable, max_sessions: 
 def market_filter(code: str, fx: FxTable, d) -> UniverseFilter:
     """Seuils de la place : 1 USD de cours minimal (converti), 2 M USD de montant médian échangé (comme aux US)."""
     m = mk.get(code)
-    one_usd_local = fx.rate("USD", m.currency, d)
+    d = pd.Timestamp(d).date()
+    one_usd_local = fx.rate("USD", m.currency, known_fx_dates(code, [d])[0])
     return replace(UniverseFilter(), min_price=one_usd_local)
 
 
 def scan_market(engine: Engine, store: WorldStore, code: str, fx: FxTable, validation: dict | None = None,
                 rules: Rules = Rules(), save: bool = True, end: date | None = None) -> dict[str, Any]:
     m = mk.get(code)
+    stored = store.stored_sessions(code)
+    if save and end is None and stored:                 # séance déjà traitée : pas de recalcul (reprise, 3.2.1)
+        with session_scope(engine) as s:
+            done = s.scalar(select(WorldScan).where(WorldScan.market == code, WorldScan.as_of == stored[-1],
+                                                    WorldScan.engine_version == WORLD_VERSION))
+            if done is not None:
+                ov = json.loads(done.overview_json)
+                cats = {k: {**v, "candidats": [json.loads(g.card_json) for g in s.scalars(
+                    select(WorldSignal).where(WorldSignal.scan_id == done.id, WorldSignal.category == k))]}
+                    for k, v in (ov.get("categories") or {}).items()}
+                return {"place": code, "version": WORLD_VERSION, "statut": done.status, "as_of": str(done.as_of),
+                        "univers": done.universe_size, "categories": cats, "conclusion": done.conclusion,
+                        "seances": ov.get("seances"), "deja_traitee": True}
     p, info = build_market_panel(store, code, fx, end=end)
     base = {"place": code, "version": WORLD_VERSION, **{k: v for k, v in info.items() if k != "noms"}}
     if p is None or len(p.close) < MIN_SESSIONS:
@@ -175,8 +204,9 @@ def _save(engine: Engine, res: dict, m: mk.Market, fx: FxTable) -> tuple[int, bo
         for key, cat in res.get("categories", {}).items():
             for c in cat["candidats"]:
                 try:
-                    eur, usd, fxd = (c["close"] * fx.rate(m.currency, "EUR", as_of),
-                                     c["close"] * fx.rate(m.currency, "USD", as_of), fx.last_date and min(fx.last_date, as_of))
+                    kd = known_fx_dates(m.code, [as_of])[0]          # taux connu à la clôture de la place
+                    eur, usd, fxd = (c["close"] * fx.rate(m.currency, "EUR", kd),
+                                     c["close"] * fx.rate(m.currency, "USD", kd), kd)
                 except FxUnavailable:
                     eur = usd = fxd = None
                 s.add(WorldSignal(scan_id=run.id, market=m.code, as_of=as_of, isin=c["isin"], ticker=c["ticker"],
@@ -192,7 +222,7 @@ def update_outcomes(engine: Engine, store: WorldStore, code: str, fx: FxTable, r
                     stale_sessions: int = 10) -> dict[str, int]:
     """Même suivi unitaire que les États-Unis (règles partagées, frais et glissement), en devise locale, puis
     rendement à 20 séances converti en EUR (effet de change séparé). Un résultat final n'est jamais recalculé."""
-    p, _ = build_market_panel(store, code, fx)
+    p, _ = build_market_panel(store, code, fx, truncate=False)      # mesure a posteriori : aucune troncature
     counts = {"mis_a_jour": 0, "finalises": 0}
     if p is None:
         return counts

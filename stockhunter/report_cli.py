@@ -487,6 +487,18 @@ def cmd_world(settings, engine, args) -> int:
                           max_files=args.max_files or settings.world_max_files, markets=codes)
     if args.action == "scan":
         return wr.scan_all(engine, store, codes)
+    if args.action in ("archive", "archive-verify", "restore"):
+        from stockhunter.world import archive as wa
+        mk_codes = codes or wa.NON_RECONSTRUCTIBLE
+        rep = (wa.push(engine, store, mk_codes, budget_mb=args.budget_mb) if args.action == "archive" else
+               wa.verify(engine, store, mk_codes) if args.action == "archive-verify" else wa.restore(engine, store, mk_codes))
+        print(f"{args.action} : archivées {rep.archived}, déjà {rep.already}, restaurées {rep.restored}, vérifiées "
+              f"{rep.verified}, divergences {len(rep.mismatches)}, absentes localement {len(rep.missing_local)}, "
+              f"non archivées {len(rep.missing_archive)}, archive {rep.size_mb} Mo" + (f", REFUS : {rep.refused}" if rep.refused else ""))
+        for x in rep.mismatches[:10]:
+            print("  DIVERGENCE", x)
+        print(wa.status(engine))
+        return 1 if rep.mismatches else (2 if rep.refused or rep.missing_archive else 0)
     if args.action == "portfolio":
         return wr.run_portfolio(engine, store, args.base)
     if args.action == "replay":                      # étude pré-enregistrée : rien n'est écrit en base
@@ -510,8 +522,29 @@ def cmd_world(settings, engine, args) -> int:
                 p = res["panel"]
                 bars = {(code, k): __import__("pandas").DataFrame({c: getattr(p, c)[k] for c in ("open", "high", "low", "close")}).dropna()
                         for k in {s.key for s in res["signaux"]}}
+                engines = [("3.2.1", simulate, GlobalConfig, None)]
+                if args.compare_legacy:                # même jeu de signaux rejoué par le simulateur 3.2 (avant / après)
+                    import importlib.util as _iu
+                    from pathlib import Path as _P
+                    _f = _P.cwd() / "tests" / "legacy" / "portfolio_v32.py"     # copie figée (dépôt), hors paquet
+                    _sp = _iu.spec_from_file_location("portfolio_v32_legacy", _f)
+                    legacy = _iu.module_from_spec(_sp)
+                    import sys as _sys
+                    _sys.modules["portfolio_v32_legacy"] = legacy
+                    _sp.loader.exec_module(legacy)
+                    engines.append(("3.2 (look-ahead)", legacy.simulate, legacy.GlobalConfig, legacy.SignalIn))
+                for name, sim_fn, cfg_cls, sig_cls in engines[1:]:
+                    sigs_l = [sig_cls(**{k: getattr(x, k) for k in ("market", "key", "ticker", "as_of", "category", "norm",
+                                                                     "signal_close", "atr", "currency", "country")})
+                              for x in res["signaux"]]
+                    for base in ("EUR", "USD"):
+                        sm = sim_fn(sigs_l, bars, fx, cfg_cls(base=base)).summary
+                        print(f"  portefeuille simulé {name} ({base}) : " + str({k: sm.get(k) for k in (
+                            "rendement_total", "drawdown_max", "trades_clos", "gagnants", "r_moyen", "debut", "fin", "frais")}))
                 for base in ("EUR", "USD"):
                     sim = simulate(res["signaux"], bars, fx, GlobalConfig(base=base))
+                    import collections as _c
+                    print(f"  motifs de refus ({base}) : " + str(_c.Counter((r["motif"] or "")[:40] for r in sim.refused).most_common(6)))
                     sm = sim.summary
                     ref = benchmarks({f"équipondéré {code}": (p.bench, wm.get(code).currency)}, fx, base,
                                      sm.get("debut"), sm.get("fin")) if sm.get("debut") else {}
@@ -677,8 +710,11 @@ def add_parsers(sub) -> dict:
     db.add_argument("--insecure-cookies", action="store_true", help="HTTP local uniquement (pas de HTTPS)")
     db.add_argument("--telegram-worker", action="store_true", help="répondre aux commandes Telegram en continu")
     wo = sub.add_parser("world", help="3.2 : marchés mondiaux (registre, collecte, scanners, classement, portefeuille)")
-    wo.add_argument("action", choices=["markets", "sync", "scan", "ranking", "portfolio", "replay", "status"])
+    wo.add_argument("action", choices=["markets", "sync", "scan", "ranking", "portfolio", "replay", "status",
+                                       "archive", "archive-verify", "restore"])
     wo.add_argument("--json", help="replay : fichier de résultats")
+    wo.add_argument("--compare-legacy", action="store_true", help="replay : rejoue aussi avec le simulateur 3.2")
+    wo.add_argument("--budget-mb", type=float, default=60.0, help="archive : budget de l'archive durable (Mo)")
     wo.add_argument("--markets", help="places (codes du registre, séparés par des virgules), défaut : toutes")
     wo.add_argument("--backfill", type=int, help="séances d'historique à reconstituer (défaut : réglage)")
     wo.add_argument("--max-files", type=int, help="fichiers au plus par place et par passage")

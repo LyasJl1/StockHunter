@@ -76,3 +76,73 @@ def test_workflows_use_read_only_token_and_never_upload_data(name):
             assert not re.search(r"var/|\.db|market|backup|\.dump|\.parquet", path), f"{name} publie {path}"
         run = s.get("run") or ""
         assert "SH_DASHBOARD_PASSWORD_HASH" not in run or name == "dashboard-credentials.yml"
+
+
+# ============================================================================ 3.2.1 : chaîne mondiale
+def test_world_steps_are_critical_and_temporary_issues_are_warnings():
+    from stockhunter.pipeline import NIGHTLY
+    world = {s.name: s for s in NIGHTLY if s.name.startswith("monde_")}
+    assert set(world) == {"monde_collecte", "monde_scanner", "monde_portefeuille"}
+    assert all(s.critical and 2 in s.warn_codes for s in world.values())
+
+
+def test_world_verify_workflow_never_masks_failures():
+    wf = load("world-verify.yml")
+    for s in steps(wf):
+        assert "continue-on-error" not in s, f"échec masqué : {s.get('name')}"
+        run = s.get("run") or ""
+        if "stockhunter world sync" in run or "stockhunter world scan" in run:
+            assert "exit $c" in run and "-eq 2" in run          # seul le code 2 (dégradation) est toléré
+
+
+def test_pipeline_turns_red_when_a_world_step_crashes(engine):
+    from stockhunter import pipeline as pl
+    world = [s for s in pl.NIGHTLY if s.name.startswith("monde_")]
+    codes = {"monde_collecte": 2, "monde_scanner": 1, "monde_portefeuille": 0}
+    runner = lambda argv: codes[next(s.name for s in world if list(s.argv) == argv)]
+    assert pl.run(engine, world, runner=runner, force=True) == 1                 # plantage scanner : rouge
+    codes["monde_scanner"] = 2
+    assert pl.run(engine, world, runner=runner, force=True) == 0                 # dégradations : alerte, pas rouge
+
+
+def test_world_exit_codes_and_targeted_alerts(engine):
+    from datetime import datetime, timezone
+    from sqlalchemy import select
+    from stockhunter.db.models import NotificationLog
+    from stockhunter.db.session import session_scope
+    from stockhunter.world import run as wr
+    assert wr.exit_code({"XPAR": (wr.OK, ""), "XNSE": (wr.NO_OPP, "")}) == 0
+    assert wr.exit_code({"XPAR": (wr.PARTIAL, ""), "XNSE": (wr.OK, "")}) == 2
+    assert wr.exit_code({"XPAR": (wr.CRITICAL, ""), "XNSE": (wr.OK, "")}) == 1
+    assert wr.exit_code({"XPAR": (wr.PARTIAL, ""), "XNSE": (wr.PARTIAL, "")}, all_failed_is_critical=True) == 1
+    now = datetime(2026, 11, 14, 1, 0, tzinfo=timezone.utc)
+    bad = {c: (wr.PARTIAL, "HTTP 503") for c in ("XPAR", "XAMS", "XMIL")} | {"XNSE": (wr.CRITICAL, "format")}
+    assert wr.queue_alerts(engine, "collecte", bad, now) == 2                 # Euronext regroupé + NSE
+    assert wr.queue_alerts(engine, "collecte", bad, now) == 0                 # aucun doublon
+    with session_scope(engine) as s:
+        texts = list(s.scalars(select(NotificationLog.text).where(NotificationLog.kind == "alert")))
+    assert len(texts) == 2 and any("XAMS, XMIL, XPAR" in t for t in texts)
+    assert wr.queue_alerts(engine, "collecte", {"XPAR": (wr.OK, "rien à faire")}, now) == 0   # place fermée
+
+
+def test_world_scan_crash_is_critical_but_other_markets_continue(engine, tmp_path, monkeypatch):
+    from datetime import date
+    from stockhunter.world import run as wr
+    from stockhunter.world import scan as ws
+    from stockhunter.world.store import WorldStore
+    from tests.world_fixtures import fx_table, synth_market
+    st = WorldStore(tmp_path / "w")
+    fx = fx_table(date(2025, 1, 1), date(2026, 11, 13))
+    st.save_fx(fx.wide.drop(columns="EUR").stack().rename("rate").reset_index()
+               .assign(date=lambda x: x["date"].dt.date))
+    synth_market(st, "XPAR", 20)
+    real = ws.scan_market
+
+    def boom(engine, store, code, *a, **k):
+        if code == "XAMS":
+            raise ZeroDivisionError("calcul incohérent")
+        return real(engine, store, code, *a, **k)
+    monkeypatch.setattr(ws, "scan_market", boom)
+    assert wr.scan_all(engine, st, ("XPAR", "XAMS")) == 1
+    etats = wr.kv_get(engine, wr.KV_STATE)["scanners"]["etats"]
+    assert etats["XAMS"][0] == wr.CRITICAL and etats["XPAR"][0] == wr.OK

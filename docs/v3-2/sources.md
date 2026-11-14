@@ -8,7 +8,7 @@ type, taille, premières lignes ; aucune donnée conservée ni publiée), puis c
 
 | Source | Places | Contenu | Historique | Licence / usage | Quota retenu |
 |---|---|---|---|---|---|
-| Euronext — téléchargement « Equities » de live.euronext.com | Paris, Amsterdam, Bruxelles, Lisbonne, Dublin, Milan, Oslo | 3 883 lignes : nom, ISIN, symbole, marché, devise, OHLC, volume, montant échangé, clôture de la dernière séance | **aucun** : constitué jour après jour | consultation personnelle ; pas de redistribution | 1 fichier par séance |
+| ~~Euronext — téléchargement « Equities » de live.euronext.com~~ **(3.2.1 : désactivé, conditions du site)** | Paris, Amsterdam, Bruxelles, Lisbonne, Dublin, Milan, Oslo | 3 883 lignes : nom, ISIN, symbole, marché, devise, OHLC, volume, montant échangé, clôture de la dernière séance | **aucun** : constitué jour après jour | **les conditions d'euronext.com interdisent l'accès automatisé et l'extraction systématique sans autorisation écrite** (voir `docs/v3-2-1/sources-europe.md`) | collecte suspendue |
 | NSE India — bhavcopy UDiFF (nsearchives) | NSE | OHLC, volume, montant, cours de référence ajusté (opérations sur titres), quotité, ISIN | archives publiques (vérifié au 13/11/2024) | usage personnel non commercial | ≤ 40 fichiers / passage, 1 toutes les 1,5 s |
 | BSE India — bhavcopy UDiFF | BSE | même format que le NSE | archives au format UDiFF | usage personnel non commercial | idem |
 | BCE — taux de référence (data-api.ecb.europa.eu) | change | ≈ 30 devises contre EUR, quotidien, publié vers 16 h CET | depuis 1999 | réutilisation libre avec mention « source : BCE » | 1 appel / jour |

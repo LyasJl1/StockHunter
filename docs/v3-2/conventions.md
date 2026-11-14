@@ -48,6 +48,11 @@
 - Résultat final jamais recalculé ; signal jamais réécrit.
 
 ## Portefeuille mondial simulé
+**3.2.1 — moteur événementiel horodaté** : événements ouverture / clôture de chaque séance (UTC, calendriers par
+place, heures d'été comprises) et valorisation à 23:59:59 UTC ; à instant égal, clôtures puis ouvertures. À
+l'ouverture, une décision n'utilise que les clôtures passées, le taux BCE publié (16 h CET) et les sélections
+connues (clôture + délai de publication) ; la trésorerie est débitée immédiatement ; la séance complète (stops,
+objectifs) est rejouée à la clôture par les règles partagées. Journal des décisions conservé (`Result.decisions`).
 - Devise de base EUR ou USD ; capital 100 000 ; risque 0,5 % du capital par position (distance du stop convertie) ;
   15 positions au plus ; 15 % au plus par ligne ; 40 % par pays ; 50 % par devise étrangère ; 30 % par secteur
   (quand le secteur est connu — N/D hors États-Unis) ; corrélation ≤ 0,80 (rendements journaliers en base, ≥ 40

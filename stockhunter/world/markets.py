@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+NOT_AUTHORIZED = "collecte automatique non autorisée (conditions du site)"
 PRICES, LIST_ONLY, NONE, QUOTA = "cours quotidiens", "liste des titres seulement", "aucune source gratuite fiable", \
     "cours disponibles mais quota insuffisant"
 
@@ -43,39 +44,64 @@ class Market:
     note: str = ""
     lot_size: int = 1              # quotité de négociation par défaut (surchargée par titre si la source la donne)
     priority: int = 9              # départage du listing principal d'un même ISIN (petit = prioritaire)
+    open_local: time | None = None # ouverture habituelle (repli) ; None = 9 h locales
 
     @property
     def continent(self) -> str:
         return {"Amérique du Nord": "Amériques", "Amérique latine": "Amériques"}.get(self.region, self.region)
 
 
-EURONEXT_NOTE = ("Instantané officiel de fin de séance (toutes les actions Euronext, OHLC, volume, montant échangé). "
-                 "Pas d'historique gratuit : l'historique se constitue jour après jour à partir de la première collecte.")
+EURONEXT_NOTE = ("Instantané officiel de fin de séance (toutes les actions Euronext, OHLC, volume, montant échangé), "
+                 "sans historique gratuit. 3.2.1 : les conditions d'utilisation d'euronext.com interdisent sans "
+                 "autorisation écrite l'accès automatisé (« robots ») et l'extraction systématique pour constituer une "
+                 "base : collecte DÉSACTIVÉE (réactivable par SH_WORLD_EURONEXT_ENABLED=true une fois l'autorisation "
+                 "obtenue). Séances déjà collectées conservées.")
+
+
+def _euronext_enabled() -> bool:
+    import os
+    return os.environ.get("SH_WORLD_EURONEXT_ENABLED", "").strip().lower() in ("1", "true", "yes", "oui")
+
+
+_EURONEXT_DATA = "cours quotidiens" if _euronext_enabled() else "collecte automatique non autorisée (conditions du site)"
 INDIA_NOTE = ("Bhavcopy officiel quotidien (OHLC, volume, montant, cours de référence ajusté des opérations sur titres) ; "
               "archives publiques permettant de reconstituer l'historique.")
+
+
+def _india_enabled(code: str) -> bool:
+    """Contrôle explicite par bourse ; aucune collecte ni simulation NSE/BSE autorisée par défaut.
+
+    Exiger au préalable une autorisation couvrant collecte, archivage et backtests.
+    La variable d'environnement constitue une déclaration, pas une preuve de licence.
+    """
+    import os
+    key = {"XNSE": "SH_WORLD_NSE_AUTHORIZED", "XBOM": "SH_WORLD_BSE_AUTHORIZED"}.get(code)
+    return bool(key and os.environ.get(key, "").strip().lower() in ("1", "true", "yes", "oui"))
+
 
 MARKETS: dict[str, Market] = {m.code: m for m in [
     # ------------------------------------------------------------------ Amérique du Nord
     Market("US", "États-Unis (NYSE, Nasdaq, NYSE American)", "US", "États-Unis", "Amérique du Nord",
            ("XNYS", "XNAS", "XASE"), "XNYS", "America/New_York", "USD", time(16, 0), 180, PRICES, ("massive", "tiingo"),
-           "Massive (barres de tout le marché, radiés compris, 2 ans) ; Tiingo pour l'univers suivi.", priority=1),
+           "Massive (barres de tout le marché, radiés compris, 2 ans) ; Tiingo pour l'univers suivi.", priority=1,
+           open_local=time(9, 30)),
     Market("XTSE", "Toronto Stock Exchange", "CA", "Canada", "Amérique du Nord", ("XTSE",), "XTSE", "America/Toronto",
            "CAD", time(16, 0), 120, NONE, (), "Aucune source gratuite de cours de tout le marché identifiée."),
     # ------------------------------------------------------------------ Europe
     Market("XPAR", "Euronext Paris", "FR", "France", "Europe", ("XPAR", "ALXP", "XMLI"), "XPAR", "Europe/Paris", "EUR",
-           time(17, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(17, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XAMS", "Euronext Amsterdam", "NL", "Pays-Bas", "Europe", ("XAMS",), "XAMS", "Europe/Amsterdam", "EUR",
-           time(17, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(17, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XBRU", "Euronext Bruxelles", "BE", "Belgique", "Europe", ("XBRU",), "XBRU", "Europe/Brussels", "EUR",
-           time(17, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(17, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XLIS", "Euronext Lisbonne", "PT", "Portugal", "Europe", ("XLIS",), "XLIS", "Europe/Lisbon", "EUR",
-           time(16, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(16, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XDUB", "Euronext Dublin", "IE", "Irlande", "Europe", ("XDUB",), "XDUB", "Europe/Dublin", "EUR",
-           time(16, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(16, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XMIL", "Euronext Milan (Borsa Italiana)", "IT", "Italie", "Europe", ("XMIL",), "XMIL", "Europe/Rome", "EUR",
-           time(17, 30), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(17, 30), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XOSL", "Euronext Oslo Børs", "NO", "Norvège", "Europe", ("XOSL",), "XOSL", "Europe/Oslo", "NOK",
-           time(16, 20), 60, PRICES, ("euronext",), EURONEXT_NOTE, priority=2),
+           time(16, 20), 60, _EURONEXT_DATA, ("euronext",), EURONEXT_NOTE, priority=2),
     Market("XETR", "Xetra / Francfort", "DE", "Allemagne", "Europe", ("XETR", "XFRA"), "XETR", "Europe/Berlin", "EUR",
            time(17, 30), 60, NONE, (), "Liste des instruments Xetra non accessible au sondage (504) ; pas de cours "
            "gratuits de tout le marché (le jeu de données public Deutsche Börse n'est plus publié)."),
@@ -103,10 +129,10 @@ MARKETS: dict[str, Market] = {m.code: m for m in [
            "sans archive longue) : source identifiée, non intégrée à ce stade."),
     Market("XNSE", "National Stock Exchange of India", "IN", "Inde", "Asie-Pacifique", ("XNSE",), "XBOM",
            "Asia/Kolkata", "INR", time(15, 30), 180, PRICES, ("nse",), INDIA_NOTE + " Calendrier BSE (mêmes fériés).",
-           priority=3),
+           priority=3, open_local=time(9, 15)),
     Market("XBOM", "BSE (Bombay Stock Exchange)", "IN", "Inde", "Asie-Pacifique", ("XBOM",), "XBOM", "Asia/Kolkata",
            "INR", time(15, 30), 180, PRICES, ("bse",), INDIA_NOTE + " Titres déjà cotés au NSE : listing secondaire.",
-           priority=4),
+           priority=4, open_local=time(9, 15)),
     Market("XKRX", "Korea Exchange", "KR", "Corée du Sud", "Asie-Pacifique", ("XKRX",), "XKRX", "Asia/Seoul", "KRW",
            time(15, 30), 120, NONE, (), "Aucune source gratuite fiable identifiée."),
     Market("XASX", "Australian Securities Exchange", "AU", "Australie", "Asie-Pacifique", ("XASX",), "XASX",
@@ -142,7 +168,8 @@ def get(code: str) -> Market:
 
 
 def with_prices() -> list[Market]:
-    return [m for m in MARKETS.values() if m.data == PRICES]
+    return [m for m in MARKETS.values() if m.data == PRICES and
+            (m.code not in ("XNSE", "XBOM") or _india_enabled(m.code))]
 
 
 # ============================================================================ calendrier et séances
@@ -157,6 +184,7 @@ class SessionInfo:
     session: date
     close_utc: datetime
     source: str                     # « exchange_calendars » | « jours ouvrés (calendrier non disponible) »
+    open_utc: datetime | None = None
 
 
 def sessions(m: Market, start: date, end: date) -> list[SessionInfo]:
@@ -173,14 +201,16 @@ def sessions(m: Market, start: date, end: date) -> list[SessionInfo]:
         a, b = max(start, cal_start), min(end, cal_end)
         if a <= b:
             idx = cal.sessions_in_range(pd.Timestamp(a), pd.Timestamp(b))
-            closes = cal.closes.loc[idx]
-            out += [SessionInfo(s.date(), c.to_pydatetime().astimezone(timezone.utc), "exchange_calendars")
-                    for s, c in zip(idx, closes)]
+            closes, opens = cal.closes.loc[idx], cal.opens.loc[idx]
+            out += [SessionInfo(s.date(), c.to_pydatetime().astimezone(timezone.utc), "exchange_calendars",
+                                o.to_pydatetime().astimezone(timezone.utc))
+                    for s, c, o in zip(idx, closes, opens)]
     fb_start = start if cal is None else max(start, cal_end + timedelta(days=1))
     for d in pd.bdate_range(fb_start, end) if fb_start <= end else []:
         d = d.date()
         close = datetime.combine(d, m.close_local, tz).astimezone(timezone.utc)
-        out.append(SessionInfo(d, close, "jours ouvrés (calendrier non disponible : fériés inconnus)"))
+        opn = datetime.combine(d, m.open_local or time(9, 0), tz).astimezone(timezone.utc)
+        out.append(SessionInfo(d, close, "jours ouvrés (calendrier non disponible : fériés inconnus)", opn))
     return out
 
 

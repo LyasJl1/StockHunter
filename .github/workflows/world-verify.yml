@@ -1,10 +1,10 @@
-name: Monde — vérification réelle (branche 3.2)
+name: Monde — vérification réelle (branches 3.2.x)
 
-# Test RÉEL des places mondiales de la 3.2 sur une base SQLite jetable : collecte (BCE, Euronext, NSE, BSE),
+# Vérification sur base jetable : collecte BCE autorisée ; Inde et Euronext suspendues par défaut,
 # stockage Parquet, référentiel, scanners, classement mondial, portefeuille simulé et rendu de la page Monde.
 # N'utilise AUCUN secret et n'écrit RIEN dans la base de production. Aucun artefact (licences : pas de
 # redistribution) ; seules des métriques et des symboles sont imprimés. Le cache (branche uniquement) permet de
-# reprendre la reconstitution de l'historique indien d'un passage à l'autre.
+# garder un cache technique de test ; aucune collecte automatique des archives NSE/BSE.
 on:
   workflow_dispatch:
     inputs:
@@ -15,7 +15,7 @@ on:
         description: "fichiers au plus par place et par passage"
         default: "320"
   push:
-    branches: [stockhunter-v3-2]
+    branches: [stockhunter-v3-2, stockhunter-v3-2-1-fixes]
     paths: ["stockhunter/world/**", ".github/workflows/world-verify.yml"]
 
 permissions:
@@ -32,6 +32,8 @@ jobs:
     env:
       SH_DATABASE_URL: sqlite:///var-verify/verify.db
       SH_WORLD_DIR: var-verify/world
+      SH_WORLD_NSE_AUTHORIZED: "false"   # test de sécurité : aucun accès NSE autorisé
+      SH_WORLD_BSE_AUTHORIZED: "false"   # idem BSE
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -46,19 +48,29 @@ jobs:
           restore-keys: world-verify-
       - name: Tests hors réseau
         run: pytest -m "not live" -q tests/test_world.py
+      - name: Sécurité NSE/BSE sans licence — aucun appel réseau
+        run: pytest -m "not live" -q tests/test_world.py -k "india_disabled_by_default_even_when_explicitly_requested or india_flags_are_separate"
       - name: Migrations (base jetable)
         run: mkdir -p var-verify && stockhunter init-db
-      - name: Collecte réelle (BCE, Euronext, NSE, BSE)
-        id: sync
-        continue-on-error: true
+      - name: Collecte BCE et places disposant de droits confirmés
+        # code 2 = dégradation temporaire (alerte visible, on continue) ; code 1 = échec critique (job ROUGE)
         run: |
+          set +e
           stockhunter world sync --backfill ${{ inputs.backfill || '300' }} --max-files ${{ inputs.max_files || '320' }}
+          c=$?
+          if [ $c -eq 2 ]; then echo "::warning title=Collecte mondiale::dégradation temporaire (code 2)"; exit 0; fi
+          exit $c
       - name: Scanners par place
-        id: scan
-        continue-on-error: true
-        run: stockhunter world scan
-      - name: Réplication internationale pré-enregistrée (docs/research/2026-11-14-preenregistrement-international.md)
-        run: stockhunter world replay --markets XNSE
+        run: |
+          set +e
+          stockhunter world scan
+          c=$?
+          if [ $c -eq 2 ]; then echo "::warning title=Scanners mondiaux::dégradation (code 2)"; exit 0; fi
+          exit $c
+      - name: Archivage et restauration — tests synthétiques hors réseau
+        run: pytest -m "not live" -q tests/test_world.py -k "archive"
+      - name: Rejeu historique — tests synthétiques hors réseau
+        run: pytest -m "not live" -q tests/test_world.py -k "replay"
       - name: Classement mondial, portefeuille, état
         # base jetable : rien n'est écrit en production ; une erreur ici rend le job rouge (pas de masquage)
         run: |
@@ -95,7 +107,3 @@ jobs:
         with:
           path: var-verify
           key: world-verify-${{ github.run_id }}
-      - name: Échec si la collecte ou les scanners ont planté
-        if: always() && (steps.sync.outcome == 'failure' || steps.scan.outcome == 'failure')
-        run: |
-          echo "::warning::Collecte ou scanner en alerte (code 2) : voir les annotations ci-dessus."

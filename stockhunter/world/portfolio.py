@@ -1,39 +1,57 @@
-"""Portefeuille mondial SIMULÉ (3.2) : sélections de toutes les places, une devise de base, contraintes de risque.
+"""Portefeuille mondial SIMULÉ (3.2.1) : moteur ÉVÉNEMENTIEL horodaté, sans information future.
 
 Aucun ordre réel. Rejoue, avec les règles de trading partagées (`trading/rules.py`, identiques au paper trading US
 et aux backtests), les sélections figées de chaque place sur leurs séances suivantes.
 
-Conventions (docs/v3-2/conventions.md) :
-- Devise de base EUR ou USD. Les positions vivent en devise locale ; elles sont valorisées chaque jour au dernier
-  taux BCE publié ≤ ce jour. Le capital, le risque et les plafonds sont mesurés dans la devise de base.
-- Ordre de traitement : jour par jour ; dans un jour, les places dans l'ordre de leur heure de clôture UTC (Tokyo,
-  Mumbai, Paris, New York) ; dans une place, entrées avant gestion des positions (comme le paper trading US).
-- Entrée à l'ouverture de la séance suivant le signal, sur la place du signal. Sans cotation pendant 5 séances :
-  plan annulé. Position sans cotation pendant 10 séances : clôturée au dernier cours connu (suspension, radiation).
-- Taille : risque = capital × `risk_per_position` (distance du stop convertie en base), arrondi à la quotité ;
-  plafonds : positions, poids par ligne, exposition par pays, par devise (hors devise de base), par secteur
-  (seulement si le secteur est connu), corrélation (rendements journaliers en base sur les dates communes).
-- Frais : courtage `cost_bps` et glissement `slippage_bps` des règles partagées ; change `fx_cost_bps` à chaque
-  conversion (achat et vente) pour une devise différente de la base. Pas de levier : la trésorerie doit couvrir
-  le montant, le courtage et le change.
-- Dividendes NON inclus (rendement de prix) ; divisions incluses via des cours ajustés.
-- Courbe de capital = trésorerie + valeur de marché des positions, en devise de base, à chaque date de séance.
-Performance SIMULÉE : jamais mélangée à une performance réelle.
+Pourquoi 3.2.1 : le simulateur 3.2 décidait les entrées « à l'ouverture » avec la valeur du portefeuille, les
+expositions et les corrélations calculées sur les CLÔTURES DU JOUR (y compris celles de places pas encore
+ouvertes), et convertissait au taux BCE du jour, publié à 16 h à Francfort, même pour un ordre passé à Mumbai à
+4 h UTC. Ces informations n'existaient pas au moment de la décision (audit indépendant du 14/11/2026).
+
+Modèle temporel (tous les instants en UTC, calendriers exchange_calendars par place, heures d'été comprises) :
+- Événements : OUVERTURE et CLÔTURE de chaque séance de chaque place, VALORISATION à 23:59:59 UTC chaque jour.
+  À instant égal : clôtures, puis ouvertures, puis valorisation ; ensuite par code de place, puis par symbole.
+- Information disponible à l'instant t :
+  * clôture d'une séance : connue à partir de son heure de clôture (une place encore ouverte n'apporte rien) ;
+  * ouverture d'une séance : connue à son heure d'ouverture (prix d'exécution) ;
+  * plus haut, plus bas, clôture du jour : connus seulement à la clôture ;
+  * taux BCE daté D : connu à partir de 16 h (Francfort) le jour D ;
+  * sélection d'une séance : connue à sa clôture + délai de publication de la place (chaîne nocturne).
+- À l'OUVERTURE d'une place : pour chaque plan en attente déjà connu, décision d'entrée avec les seules
+  informations disponibles (capital = trésorerie + positions au dernier cours connu, une position ouverte le
+  jour même valant son prix d'entrée tant qu'aucune clôture postérieure n'est connue ; expositions, corrélations
+  sur des rendements dont la clôture est passée ; change connu). La zone d'entrée est vérifiée sur la seule
+  ouverture. La trésorerie est débitée immédiatement (montant + courtage + change) : aucune position ne peut
+  consommer plus que la trésorerie disponible à cet instant.
+- À la CLÔTURE : la séance complète est rejouée par `trading.rules.step` avec la quantité décidée à l'ouverture
+  (stop, TP1, TP2 et stop suiveur dans la séance, mêmes hypothèses défavorables que le paper trading US) ; les
+  sorties sont converties au taux connu à la clôture.
+
+Conventions inchangées : risque 0,5 % par position, plafonds pays / devise / secteur / ligne / corrélation,
+courtage 10 pb + glissement 5 pb (règles partagées), change 25 pb par conversion, dividendes NON inclus,
+divisions via des cours ajustés, plan annulé sans cotation pendant 5 séances, position sans cotation pendant 10
+séances clôturée au dernier cours connu. Performance SIMULÉE : jamais mélangée à une performance réelle.
 """
 
 from __future__ import annotations
 
+import bisect
+import copy
 import math
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
-from stockhunter.trading.rules import Bar, Position, Rules, plan, step
+from stockhunter.trading.rules import Bar, Position, Rules, _sell, plan, step
 from stockhunter.world import markets as mk
-from stockhunter.world.fx import FxTable, FxUnavailable
+from stockhunter.world.fx import FxTable, FxUnavailable, ecb_known_date
+
+ENGINE = "événementiel horodaté 3.2.1"
+CLOSE, OPEN, VALUATION = 0, 1, 2          # ordre de traitement à instant égal
 
 
 @dataclass(frozen=True)
@@ -71,12 +89,16 @@ class SignalIn:
     lot: int = 1
 
 
-@dataclass
+@dataclass(eq=False)                # identité d'objet : deux plans identiques restent distincts
 class Holding:
     sig: SignalIn
     pos: Position
+    known_at: datetime | None = None       # instant où la sélection est connue
     waited: int = 0
     unseen: int = 0
+    shares_decided: float = 0.0
+    entry_session: date | None = None
+    fill: float | None = None
     last_close: float | None = None
     fx_fees: float = 0.0
     commissions: float = 0.0
@@ -89,240 +111,346 @@ class Result:
     refused: list[dict]
     summary: dict[str, Any]
     exposures: dict[str, dict[str, float]] = field(default_factory=dict)
+    decisions: list[dict] = field(default_factory=list)   # journal : instant, information utilisée, décision
 
 
-def _market_order(codes) -> list[str]:
-    def close_minutes(c):
-        t = mk.get(c).close_local
-        from datetime import datetime, timezone
-        from zoneinfo import ZoneInfo
-        return datetime.combine(date(2026, 1, 15), t, ZoneInfo(mk.get(c).tz)).astimezone(timezone.utc).hour * 60 + t.minute
-    return sorted(codes, key=close_minutes)
+class _Prices:
+    """Cours d'un titre avec l'instant UTC de publication de chaque clôture (pour « ce qui est connu à t »)."""
+
+    def __init__(self, market: str, df: pd.DataFrame):
+        self.market = market
+        self.df = df.sort_index()
+        times = session_times(market, [d.date() for d in self.df.index])
+        self.close_t = [times[d.date()][1] for d in self.df.index]
+        self.open_t = [times[d.date()][0] for d in self.df.index]
+        self.closes = self.df["close"].to_numpy(dtype=float)
+
+    def known_close(self, t: datetime, since: date | None = None) -> float | None:
+        i = bisect.bisect_right(self.close_t, t) - 1
+        while i >= 0 and not np.isfinite(self.closes[i]):
+            i -= 1
+        if i < 0 or (since is not None and self.df.index[i].date() < since):
+            return None
+        return float(self.closes[i])
+
+    def known_history(self, t: datetime, n: int) -> tuple[list[datetime], np.ndarray, list[date]]:
+        i = bisect.bisect_right(self.close_t, t)
+        lo = max(0, i - n)
+        return self.close_t[lo:i], self.closes[lo:i], [d.date() for d in self.df.index[lo:i]]
+
+    def bar(self, d: date):
+        ts = pd.Timestamp(d)
+        if ts not in self.df.index:
+            return None
+        b = self.df.loc[ts]
+        if not (np.isfinite(b["open"]) and np.isfinite(b["close"])):
+            return None
+        return b
+
+
+def session_times(market: str, days: list[date]) -> dict[date, tuple[datetime, datetime]]:
+    """(ouverture, clôture) UTC de chaque séance : calendrier de la place, sinon horaires habituels (signalé)."""
+    m = mk.get(market)
+    if not days:
+        return {}
+    cal = {s.session: (s.open_utc, s.close_utc) for s in mk.sessions(m, min(days), max(days))}
+    tz = ZoneInfo(m.tz)
+    out = {}
+    for d in days:
+        if d in cal and cal[d][0] is not None:
+            out[d] = cal[d]
+        else:                                    # séance hors calendrier (donnée un jour férié) : horaires usuels
+            out[d] = (datetime.combine(d, m.open_local or time(9, 0), tz).astimezone(timezone.utc),
+                      datetime.combine(d, m.close_local, tz).astimezone(timezone.utc))
+    return out
 
 
 def simulate(signals: list[SignalIn], bars: dict[tuple[str, str], pd.DataFrame], fx: FxTable,
              cfg: GlobalConfig = GlobalConfig(), rules: Rules = Rules()) -> Result:
     """`bars[(place, clé)]` : DataFrame indexé par date (Timestamp) avec open/high/low/close en devise locale,
-    ajustés des divisions, uniquement les séances où le titre a coté."""
-    first = min((pd.Timestamp(s.as_of) for s in signals), default=None)
-    # la courbe commence au premier signal : pas de mois de trésorerie oisive avant toute sélection
-    dates = sorted(d for d in ({d for df in bars.values() for d in df.index} | {pd.Timestamp(s.as_of) for s in signals})
-                   if first is not None and d >= first)
-    if not dates:
-        return Result(pd.Series(dtype=float), [], [], {"statut": "aucune donnée"})
-    sessions_by_market: dict[str, set] = {}
-    for (m, _), df in bars.items():
-        sessions_by_market.setdefault(m, set()).update(df.index)
-    order = _market_order(sessions_by_market)
+    ajustés des divisions, uniquement les séances où le titre a coté. Déterministe."""
+    if not signals:
+        return Result(pd.Series(dtype=float), [], [], {"statut": "aucune donnée", "moteur": ENGINE})
+    prices = {k: _Prices(k[0], df) for k, df in bars.items() if len(df)}
+    first = min(s.as_of for s in signals)
+    # ---------------------------------------------------------------- calendrier des événements
+    events: list[tuple] = []
+    sessions_of: dict[str, list[date]] = {}
+    for (m, _), p in prices.items():
+        sessions_of.setdefault(m, set()).update(d.date() for d in p.df.index if d.date() >= first)
+    for m in list(sessions_of):
+        days = sorted(sessions_of[m])
+        sessions_of[m] = days
+        for d, (o, c) in session_times(m, days).items():
+            events.append((o, OPEN, m, d))
+            events.append((c, CLOSE, m, d))
+    all_days = sorted({e[0].date() for e in events} | {first})
+    for d in all_days:
+        events.append((datetime.combine(d, time(23, 59, 59), timezone.utc), VALUATION, "", d))
+    events.sort(key=lambda e: (e[0], e[1], e[2], e[3]))
+
+    known_of: dict[int, datetime] = {}
+    sig_close_t = {}
+    for s in signals:
+        if s.market not in sessions_of and (s.market, s.key) not in prices:
+            continue
+        ct = session_times(s.market, [s.as_of])[s.as_of][1]
+        sig_close_t[id(s)] = ct + timedelta(minutes=mk.get(s.market).delay_min)
+    waiting = sorted([s for s in signals if id(s) in sig_close_t],
+                     key=lambda s: (sig_close_t[id(s)], -s.norm, s.market, s.ticker))
+    wi = 0
     pending: list[Holding] = []
+    entering: list[Holding] = []
     open_: list[Holding] = []
-    trades, refused = [], []
+    trades, refused, decisions = [], [], []
     cash = cfg.capital
-    equity_pts: dict[pd.Timestamp, float] = {}
-    sig_by_day: dict[pd.Timestamp, list[SignalIn]] = {}
-    for s in sorted(signals, key=lambda s: (s.as_of, -s.norm, s.market, s.ticker)):
-        sig_by_day.setdefault(pd.Timestamp(s.as_of), []).append(s)
     fees = {"courtage": 0.0, "change": 0.0}
+    equity_pts: dict[pd.Timestamp, float] = {}
+    conv_cache: dict[tuple[str, str], tuple[list[datetime], np.ndarray]] = {}
 
-    def px(h: Holding, d) -> float | None:
-        df = bars.get((h.sig.market, h.sig.key))
-        if df is None:
-            return None
-        s = df["close"].loc[:d].dropna()
-        return float(s.iloc[-1]) if len(s) else None
+    def rate(ccy: str, t: datetime) -> float:
+        return fx.known_rate(ccy, cfg.base, t)
 
-    def to_base(amount: float, ccy: str, d) -> float:
-        return amount * fx.rate(ccy, cfg.base, d)
+    def held_value(h: Holding, t: datetime) -> float:
+        """Valeur en base au dernier cours connu à t ; position du jour sans clôture connue : prix d'entrée."""
+        p = prices.get((h.sig.market, h.sig.key))
+        px = p.known_close(t, since=h.entry_session) if p else None
+        if px is None:
+            px = h.fill if h.fill is not None else (h.last_close or 0.0)
+        shares = h.shares_decided if h in entering else h.pos.shares
+        return px * shares * rate(h.sig.currency, t)
 
-    def value(d) -> float:
-        tot = cash
-        for h in open_:
-            p = px(h, d)
-            if p is not None:
-                tot += to_base(p * h.pos.shares, h.sig.currency, d)
-        return tot
+    def holdings() -> list[Holding]:
+        return open_ + entering
 
-    def base_returns(h_or_sig, d) -> pd.Series:
-        sig = h_or_sig.sig if isinstance(h_or_sig, Holding) else h_or_sig
-        df = bars.get((sig.market, sig.key))
-        if df is None:
-            return pd.Series(dtype=float)
-        c = df["close"].loc[:d].dropna().iloc[-(cfg.corr_window + 1):]
-        try:
-            r = fx.series(sig.currency, cfg.base, c.index)
-        except FxUnavailable:
-            return pd.Series(dtype=float)
-        return (c * r).pct_change().dropna()
+    def equity(t: datetime) -> float:
+        return cash + sum(held_value(h, t) for h in holdings())
 
-    def exposure(d, attr: str) -> dict[str, float]:
+    def exposure(t: datetime, attr: str) -> dict[str, float]:
         out: dict[str, float] = {}
-        for h in open_:
-            p = px(h, d)
-            if p is None:
-                continue
+        for h in holdings():
             k = getattr(h.sig, attr) or "N/D"
-            out[k] = out.get(k, 0.0) + to_base(p * h.pos.shares, h.sig.currency, d)
+            out[k] = out.get(k, 0.0) + held_value(h, t)
         return out
 
-    def flow(h: Holding, ev, d) -> None:
+    def base_returns(sig: SignalIn, t: datetime) -> pd.Series:
+        """Rendements journaliers en base sur les SEULES clôtures passées à t ; chaque clôture convertie au taux
+        connu à son heure de clôture."""
+        key = (sig.market, sig.key)
+        p = prices.get(key)
+        if p is None:
+            return pd.Series(dtype=float)
+        if key not in conv_cache:
+            vals = []
+            for ct, c in zip(p.close_t, p.closes):
+                try:
+                    vals.append(c * fx.known_rate(sig.currency, cfg.base, ct))
+                except FxUnavailable:
+                    vals.append(np.nan)
+            conv_cache[key] = (p.close_t, np.array(vals))
+        ts, vals = conv_cache[key]
+        i = bisect.bisect_right(ts, t)
+        lo = max(0, i - cfg.corr_window - 1)
+        days = [d.date() for d in p.df.index[lo:i]]
+        return pd.Series(vals[lo:i], index=days).pct_change().dropna()
+
+    def caps(h: Holding, eq: float, t: datetime) -> str | None:
+        if len(holdings()) >= cfg.max_positions:
+            return f"nombre maximal de positions ({cfg.max_positions}) atteint"
+        nominal = eq * cfg.max_weight
+        if exposure(t, "country").get(h.sig.country, 0.0) + nominal > eq * cfg.max_country + 1e-9:
+            return f"exposition maximale au pays {h.sig.country} ({cfg.max_country:.0%})"
+        if (h.sig.currency != cfg.base
+                and exposure(t, "currency").get(h.sig.currency, 0.0) + nominal > eq * cfg.max_currency + 1e-9):
+            return f"exposition maximale à la devise {h.sig.currency} ({cfg.max_currency:.0%})"
+        if h.sig.sector and exposure(t, "sector").get(h.sig.sector, 0.0) + nominal > eq * cfg.max_sector + 1e-9:
+            return f"exposition maximale au secteur {h.sig.sector} ({cfg.max_sector:.0%})"
+        r_new = base_returns(h.sig, t)
+        for o in holdings():
+            r_o = base_returns(o.sig, t)
+            common = r_new.index.intersection(r_o.index)
+            if len(common) >= cfg.corr_min_common:
+                c = float(np.corrcoef(r_new.loc[common], r_o.loc[common])[0, 1])
+                if np.isfinite(c) and c > cfg.max_corr:
+                    return f"corrélation {c:.2f} > {cfg.max_corr:.2f} avec {o.sig.ticker} ({o.sig.market})"
+        return None
+
+    def book(h: Holding, ev, t: datetime) -> None:
+        """Flux de trésorerie d'une sortie (TP1, clôture) au taux connu à t."""
         nonlocal cash
         amount = ev.price * ev.shares
-        comm = amount * rules.cost_bps / 1e4
-        gross = to_base(amount, h.sig.currency, d)
-        comm_b = to_base(comm, h.sig.currency, d)
+        r = rate(h.sig.currency, t)
+        gross, comm = amount * r, amount * rules.cost_bps / 1e4 * r
         fxf = gross * cfg.fx_cost_bps / 1e4 if h.sig.currency != cfg.base else 0.0
-        if ev.kind == "OPENED":
-            cash -= gross + comm_b + fxf
-        else:
-            cash += gross - comm_b - fxf
+        cash += gross - comm - fxf
+        h.commissions += comm
         h.fx_fees += fxf
-        h.commissions += comm_b
-        fees["courtage"] += comm_b
+        fees["courtage"] += comm
         fees["change"] += fxf
 
-    for d in dates:
-        todays = {m for m in order if d in sessions_by_market.get(m, set())}
-        for m in order:
-            if m not in todays:
+    def finish(h: Holding) -> None:
+        trades.append(_trade(h))
+
+    for t, kind, m, d in events:
+        if kind == VALUATION:
+            try:
+                equity_pts[pd.Timestamp(d)] = equity(t)
+            except FxUnavailable:
+                pass
+            continue
+        # sélections devenues connues (clôture + délai de publication) : plans en attente
+        while wi < len(waiting) and sig_close_t[id(waiting[wi])] <= t:
+            s = waiting[wi]
+            wi += 1
+            if any((x.sig.market, x.sig.key) == (s.market, s.key) for x in pending + holdings()):
                 continue
-            # ---------------------------------------------------------- 1. entrées des plans en attente
-            for h in [h for h in pending if h.sig.market == m]:
-                df = bars.get((m, h.sig.key))
-                if df is None or d not in df.index or not np.isfinite(df.at[d, "open"]):
+            pending.append(Holding(sig=s, pos=plan(s.signal_close, s.atr, rules), known_at=sig_close_t[id(s)]))
+        if kind == OPEN:
+            todays = [h for h in pending if h.sig.market == m and h.known_at <= t]
+            todays.sort(key=lambda h: (-h.sig.norm, h.sig.ticker))
+            n_new = 0
+            for h in todays:
+                p = prices.get((m, h.sig.key))
+                b = p.bar(d) if p else None
+                if b is None:
                     h.waited += 1
                     if h.waited >= cfg.plan_ttl_sessions:
                         pending.remove(h)
-                        refused.append({"ticker": h.sig.ticker, "place": m, "date": str(d.date()),
-                                        "motif": "aucune cotation dans les 5 séances suivant le signal"})
+                        refused.append(_ref(h, d, "aucune cotation dans les 5 séances suivant le signal"))
                     continue
                 pending.remove(h)
-                eq = value(d)
-                b = df.loc[d]
-                why = _check_caps(h, eq, d, open_, exposure, base_returns, cfg)
+                if n_new >= cfg.max_new_per_day:
+                    refused.append(_ref(h, d, f"plus de {cfg.max_new_per_day} entrées sur la place ce jour"))
+                    continue
+                try:
+                    eq = equity(t)
+                    unit = rate(h.sig.currency, t)
+                except FxUnavailable as exc:
+                    refused.append(_ref(h, d, f"change inconnu : {exc}"))
+                    continue
+                why = caps(h, eq, t)
+                o = float(b["open"])
 
-                def size(fill: float, off: float, h=h, eq=eq, why=why):
+                def size(fill: float, off: float, why=why, eq=eq, unit=unit, h=h):
                     if why:
                         return 0, why
-                    unit_base = to_base(1.0, h.sig.currency, d)
-                    risk_shares = eq * cfg.risk_per_position / (off * unit_base) if off > 0 else 0
-                    cap_shares = min(eq * cfg.max_weight, cash / (1 + (rules.cost_bps + cfg.fx_cost_bps) / 1e4)) / (fill * unit_base)
-                    n = math.floor(min(risk_shares, cap_shares) / h.sig.lot) * h.sig.lot
+                    risk_shares = eq * cfg.risk_per_position / (off * unit) if off > 0 else 0
+                    budget = min(eq * cfg.max_weight,
+                                 cash / (1 + (rules.cost_bps + cfg.fx_cost_bps) / 1e4))
+                    n = math.floor(min(risk_shares, budget / (fill * unit)) / h.sig.lot) * h.sig.lot
                     if n < 1:
-                        return 0, ("trésorerie ou poids maximal insuffisant pour une quotité" if risk_shares >= h.sig.lot
-                                   else "risque par position trop faible pour une quotité")
+                        return 0, ("trésorerie ou poids maximal insuffisant pour une quotité"
+                                   if risk_shares >= h.sig.lot else "risque par position trop faible pour une quotité")
                     return n, None
 
-                evs = step(h.pos, Bar(d.date(), float(b["open"]), float(b["high"]), float(b["low"]), float(b["close"])),
-                           size, rules)
-                if h.pos.status == "CANCELLED":
-                    refused.append({"ticker": h.sig.ticker, "place": m, "date": str(d.date()), "motif": h.pos.close_reason})
+                # décision sur la SEULE ouverture : copie du plan, séance réduite à son prix d'ouverture
+                probe = copy.deepcopy(h.pos)
+                step(probe, Bar(d, o, o, o, o), size, rules)
+                decisions.append({"instant": t.isoformat(), "place": m, "ticker": h.sig.ticker, "seance": str(d),
+                                  "capital_connu": round(eq, 2), "taux": unit, "taux_bce_du": str(ecb_known_date(t)),
+                                  "decision": "entrée" if probe.status != "CANCELLED" else probe.close_reason,
+                                  "quantite": probe.shares if probe.status != "CANCELLED" else 0})
+                if probe.status == "CANCELLED":
+                    refused.append(_ref(h, d, probe.close_reason))
                     continue
-                for ev in evs:
-                    if ev.kind in ("OPENED", "TP1", "CLOSED"):
-                        flow(h, ev, d)
-                h.last_close = float(b["close"])
-                if h.pos.status == "OPEN":
-                    open_.append(h)
-                else:
-                    trades.append(_trade(h, cfg, fx))
-            # ---------------------------------------------------------- 2. gestion des positions ouvertes
-            for h in [h for h in open_ if h.sig.market == m and h.pos.entry_date != d.date()]:
-                df = bars.get((m, h.sig.key))
-                if df is None or d not in df.index or not np.isfinite(df.at[d, "open"]):
-                    h.unseen += 1
-                    if h.unseen >= cfg.stale_sessions and h.last_close:
-                        _force_close(h, d, rules, flow)
-                        open_.remove(h)
-                        trades.append(_trade(h, cfg, fx))
-                    continue
-                h.unseen = 0
-                b = df.loc[d]
-                for ev in step(h.pos, Bar(d.date(), float(b["open"]), float(b["high"]), float(b["low"]),
-                                          float(b["close"])), lambda f, o: (0, "déjà ouverte"), rules):
-                    if ev.kind in ("TP1", "CLOSED"):
-                        flow(h, ev, d)
-                h.last_close = float(b["close"])
-                if h.pos.status == "CLOSED":
-                    open_.remove(h)
-                    trades.append(_trade(h, cfg, fx))
-            # ---------------------------------------------------------- 3. nouveaux signaux de la séance
-            day_sigs = [s for s in sig_by_day.get(d, []) if s.market == m][: cfg.max_new_per_day]
-            for s in day_sigs:
-                held = {(h.sig.market, h.sig.key) for h in open_ + pending}
-                if (s.market, s.key) in held:
-                    continue
-                pending.append(Holding(sig=s, pos=plan(s.signal_close, s.atr, rules)))
-        try:
-            equity_pts[d] = value(d)
-        except FxUnavailable:
+                h.shares_decided, h.fill, h.entry_session = probe.shares, probe.entry_price, d
+                gross = h.fill * h.shares_decided * unit
+                comm = gross * rules.cost_bps / 1e4
+                fxf = gross * cfg.fx_cost_bps / 1e4 if h.sig.currency != cfg.base else 0.0
+                cash -= gross + comm + fxf
+                h.commissions += comm
+                h.fx_fees += fxf
+                fees["courtage"] += comm
+                fees["change"] += fxf
+                entering.append(h)
+                n_new += 1
             continue
+        # ------------------------------------------------------------ CLÔTURE de la place m, séance d
+        for h in [h for h in entering if h.sig.market == m and h.entry_session == d]:
+            b = prices[(m, h.sig.key)].bar(d)
+            evs = step(h.pos, Bar(d, float(b["open"]), float(b["high"]), float(b["low"]), float(b["close"])),
+                       lambda fill, off, n=h.shares_decided: (n, None), rules)
+            entering.remove(h)
+            assert h.pos.entry_price is not None and abs(h.pos.entry_price - h.fill) < 1e-9
+            for ev in evs:
+                if ev.kind in ("TP1", "CLOSED"):
+                    book(h, ev, t)
+            h.last_close = float(b["close"])
+            if h.pos.status == "OPEN":
+                open_.append(h)
+            else:
+                finish(h)
+        for h in [h for h in open_ if h.sig.market == m and h.entry_session != d]:
+            p = prices[(m, h.sig.key)]
+            b = p.bar(d)
+            if b is None:
+                h.unseen += 1
+                if h.unseen >= cfg.stale_sessions and h.last_close:
+                    n0 = len(h.pos.events)
+                    _sell(h.pos, d, h.last_close, h.pos.shares, rules, "CLOSED",
+                          "plus de cotation depuis 10 séances (suspension ou radiation) : vente au dernier cours connu")
+                    for ev in h.pos.events[n0:]:
+                        book(h, ev, t)
+                    open_.remove(h)
+                    finish(h)
+                continue
+            h.unseen = 0
+            for ev in step(h.pos, Bar(d, float(b["open"]), float(b["high"]), float(b["low"]), float(b["close"])),
+                           lambda f, o: (0, "déjà ouverte"), rules):
+                if ev.kind in ("TP1", "CLOSED"):
+                    book(h, ev, t)
+            h.last_close = float(b["close"])
+            if h.pos.status == "CLOSED":
+                open_.remove(h)
+                finish(h)
+        if cash < -1e-6:
+            raise AssertionError(f"trésorerie négative ({cash:.2f}) : incohérence du simulateur")
+
     eq = pd.Series(equity_pts).sort_index()
-    last = dates[-1]
-    exp = {k: {kk: round(vv / eq.iloc[-1], 4) for kk, vv in exposure(last, k).items()} for k in ("country", "currency", "sector")} \
-        if len(eq) else {}
-    return Result(eq, trades, refused, _summary(eq, trades, fees, cfg, open_), exp)
+    last_t = events[-1][0]
+    exp = {}
+    if len(eq):
+        tot = float(eq.iloc[-1])
+        exp = {k: {kk: round(vv / tot, 4) for kk, vv in exposure(last_t, k).items()} for k in ("country", "currency", "sector")}
+    return Result(eq, trades, refused, _summary(eq, trades, fees, cfg, open_ + entering, cash), exp, decisions)
 
 
-def _check_caps(h: Holding, eq: float, d, open_, exposure, base_returns, cfg: GlobalConfig) -> str | None:
-    if len(open_) >= cfg.max_positions:
-        return f"nombre maximal de positions ({cfg.max_positions}) atteint"
-    nominal = eq * cfg.max_weight                       # poids maximal hypothétique de la nouvelle ligne
-    if exposure(d, "country").get(h.sig.country, 0.0) + nominal > eq * cfg.max_country + 1e-9:
-        return f"exposition maximale au pays {h.sig.country} ({cfg.max_country:.0%})"
-    if h.sig.currency != cfg.base and exposure(d, "currency").get(h.sig.currency, 0.0) + nominal > eq * cfg.max_currency + 1e-9:
-        return f"exposition maximale à la devise {h.sig.currency} ({cfg.max_currency:.0%})"
-    if h.sig.sector and exposure(d, "sector").get(h.sig.sector, 0.0) + nominal > eq * cfg.max_sector + 1e-9:
-        return f"exposition maximale au secteur {h.sig.sector} ({cfg.max_sector:.0%})"
-    r_new = base_returns(h, d)
-    for o in open_:
-        r_o = base_returns(o, d)
-        common = r_new.index.intersection(r_o.index)
-        if len(common) >= cfg.corr_min_common:
-            c = float(np.corrcoef(r_new.loc[common], r_o.loc[common])[0, 1])
-            if np.isfinite(c) and c > cfg.max_corr:
-                return f"corrélation {c:.2f} > {cfg.max_corr:.2f} avec {o.sig.ticker} ({o.sig.market})"
-    return None
+def _ref(h: Holding, d: date, why: str | None) -> dict:
+    return {"ticker": h.sig.ticker, "place": h.sig.market, "date": str(d), "motif": why}
 
 
-def _force_close(h: Holding, d, rules: Rules, flow) -> None:
-    from stockhunter.trading.rules import _sell
-    n0 = len(h.pos.events)
-    _sell(h.pos, d.date(), h.last_close, h.pos.shares, rules, "CLOSED",
-          "plus de cotation depuis 10 séances (suspension ou radiation) : vente au dernier cours connu")
-    for ev in h.pos.events[n0:]:
-        flow(h, ev, d)
-
-
-def _trade(h: Holding, cfg: GlobalConfig, fx: FxTable) -> dict:
+def _trade(h: Holding) -> dict:
     p = h.pos
     r = (p.realized - p.costs) / p.initial_risk if p.initial_risk else None
     return {"ticker": h.sig.ticker, "place": h.sig.market, "pays": h.sig.country, "devise": h.sig.currency,
             "categorie": h.sig.category, "signal": str(h.sig.as_of), "entree": str(p.entry_date),
             "sortie": str(p.exit_date), "r": None if r is None else round(r, 3), "motif": p.close_reason,
-            "frais_change_base": round(h.fx_fees, 2), "courtage_base": round(h.commissions, 2)}
+            "quantite": h.shares_decided, "frais_change_base": round(h.fx_fees, 2), "courtage_base": round(h.commissions, 2)}
 
 
-def _summary(eq: pd.Series, trades: list[dict], fees: dict, cfg: GlobalConfig, open_) -> dict[str, Any]:
+def _summary(eq: pd.Series, trades: list[dict], fees: dict, cfg: GlobalConfig, live, cash: float) -> dict[str, Any]:
     if eq.empty:
-        return {"statut": "aucune valorisation possible"}
+        return {"statut": "aucune valorisation possible", "moteur": ENGINE}
     ret = eq.pct_change().dropna()
     days = (eq.index[-1] - eq.index[0]).days
     total = float(eq.iloc[-1] / cfg.capital - 1)
     dd = float((eq / eq.cummax() - 1).min())
     rs = [t["r"] for t in trades if t["r"] is not None]
     return {"devise_base": cfg.base, "capital_initial": cfg.capital, "valeur_finale": round(float(eq.iloc[-1]), 2),
-            "rendement_total": total, "annualise": (1 + total) ** (365 / days) - 1 if days >= 365 else None,
+            "tresorerie_finale": round(cash, 2), "rendement_total": total,
+            "annualise": (1 + total) ** (365 / days) - 1 if days >= 365 else None,
             "drawdown_max": dd, "volatilite_annuelle": float(ret.std() * math.sqrt(252)) if len(ret) > 20 else None,
             "debut": str(eq.index[0].date()), "fin": str(eq.index[-1].date()), "trades_clos": len(trades),
-            "positions_ouvertes": len(open_), "gagnants": (sum(r > 0 for r in rs) / len(rs)) if rs else None,
+            "positions_ouvertes": len(live), "gagnants": (sum(r > 0 for r in rs) / len(rs)) if rs else None,
             "r_moyen": (sum(rs) / len(rs)) if rs else None, "frais": {k: round(v, 2) for k, v in fees.items()},
-            "nature": "SIMULATION (aucun ordre réel)",
+            "moteur": ENGINE, "nature": "SIMULATION (aucun ordre réel)",
             "lecture": "échantillon insuffisant pour conclure" if len(rs) < 30 else "descriptif, non validé"}
 
 
 def benchmarks(series: dict[str, tuple[pd.Series, str]], fx: FxTable, base: str, start, end) -> dict[str, Any]:
-    """Rendement de chaque référence sur LA MÊME période et dans LA MÊME devise que le portefeuille.
-    `series[nom] = (clôtures, devise)`. Une référence sans donnée sur la période : N/D."""
+    """Rendement de chaque référence sur LA MÊME période et dans LA MÊME devise que le portefeuille, valorisée
+    comme lui en fin de journée UTC (taux BCE du jour, publié à 16 h CET). `series[nom] = (clôtures, devise)`.
+    Une référence sans donnée sur la période : N/D."""
     out = {}
     for name, (s, ccy) in series.items():
         s = s.dropna()
