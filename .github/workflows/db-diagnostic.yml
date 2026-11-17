@@ -31,4 +31,6 @@ jobs:
           { echo '```json'; cat diag.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Audit du paper trading (lecture seule — 3.4)
         # recalcule capital, P&L, frais et statuts depuis le journal immuable ; aucune écriture
-        run: stockhunter paper audit | tee paper-audit.json
+        run: |
+          set -o pipefail
+          stockhunter paper audit | tee paper-audit.json

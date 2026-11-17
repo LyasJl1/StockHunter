@@ -115,7 +115,7 @@ def audit(engine: Engine) -> dict[str, Any]:
                      "latent_journal": _r(latent_j), "valeur_journal": _r(cfg.capital + realized_j + latent_j),
                      "frais_journal": _r(fees_events)},
         "refus_repetes": repeated, "signaux_ready": ready, "trades": rows,
-        "alertes": {"par_statut": dict(Counter((k, st) for k, st, _d, _t in notes)),
+        "alertes": {"par_statut": {f"{k}/{st}": n for (k, st), n in Counter((k, st) for k, st, _d, _t in notes).items()},
                     "doublons_de_texte": sum(v - 1 for v in Counter(t for _k, _s, _d, t in notes).values() if v > 1),
                     "trade": [(d, st) for k, st, d, _t in notes if k == "trade"][:30]},
     })

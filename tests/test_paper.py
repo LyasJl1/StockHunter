@@ -255,3 +255,17 @@ def test_slot_freed_intraday_is_not_reused_at_same_day_open(engine):
     paper.process(engine, cfg)
     assert trade(engine, ids["ZZA"]).status == "CLOSED"
     assert trade(engine, bid).status == "CANCELLED" and "limite de 1 positions" in trade(engine, bid).close_reason
+
+
+def test_paper_audit_reconciles_journal_table_and_dashboard(engine):
+    """3.4 : l'audit en lecture seule recalcule tout depuis le journal et ne signale aucune incohérence sur un
+    portefeuille simulé cohérent ; il signale qu'un plan n'est pas un trade."""
+    import json as _json
+    from stockhunter.portfolio import audit, paper
+    _src, ids, scan_id = setup(engine, ("ZZA", "ZZB"))
+    paper.plan_from_scan(engine, scan_id)
+    paper.process(engine)
+    a = _json.loads(audit.main(engine))
+    assert not [x for x in a["anomalies"] if "≠" in x]
+    c = a["comptes"]
+    assert c["plans_actifs"] + c["positions_ouvertes"] + c["positions_cloturees"] + c["plans_annules"] == c["lignes_paper_trades"]
