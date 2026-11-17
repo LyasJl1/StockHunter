@@ -1,8 +1,8 @@
 <div class="card">
-<p class="sub">{{ rows|length }} action(s){% if meta %} · scan du {{ meta.as_of|d }} · {{ meta.version }} [{{ meta.stage }}]{% endif %} · sous-scores : T technique, F fondamentaux, C catalyseurs, V volume, M marché, R risque (100 = faible)</p>
+<p class="sub">{{ rows|length }} action(s){% if meta %} · scan du {{ meta.as_of|d }} · {{ meta.version }} [{{ meta.stage }}]{% endif %} · éligibilité = faisabilité avec le capital simulé (filtre, ne modifie pas le score) · sous-scores : T technique, F fondamentaux, C catalyseurs, V volume, M marché, R risque (100 = faible)</p>
 <table>
 <tr><th>Action</th><th class="r">Clôture</th><th class="r">Score</th><th class="hide-sm">T · F · C · V · M · R</th><th>Stratégies</th>
-<th class="r hide-sm">Volatilité</th><th class="r hide-sm">Réaction résultats</th><th>Statut</th></tr>
+<th class="r hide-sm">Volatilité</th><th class="r hide-sm">Réaction résultats</th><th>Statut</th><th>Éligible avec mon capital</th><th class="r">Quantité</th><th class="r">Risque max</th></tr>
 {% for r in rows %}
 <tr>
   <td><a href="/stock/{{ r.symbol }}"><b>{{ r.symbol }}</b></a><div class="sub">{{ (r.name or '')[:28] }}</div></td>
@@ -13,6 +13,10 @@
   <td class="r hide-sm">{{ r.atr|pct(1, false) }}</td>
   <td class="r hide-sm">{{ r.catalyst|num(0) if r.catalyst is not none else '—' }}</td>
   <td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
+  {% set el = (elig or {}).get(r.symbol) %}
+  <td>{% if el %}<span class="{{ 'pos' if el.statut == 'ÉLIGIBLE' else 'neg' }}">{{ el.statut }}</span>{% if el.motif %}<div class="sub">{{ el.motif }}</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td class="r">{{ el.quantite if el else '—' }}{% if el and el.qty_risk is not none %}<div class="sub">risque {{ el.qty_risk }} · achat {{ el.qty_cash }}</div>{% endif %}</td>
+  <td class="r">{{ (el.risque_max|num(2)) ~ ' $' if el and el.risque_max else '—' }}</td>
 </tr>
-{% else %}<tr><td colspan="8" class="muted">Aucune action ne correspond aux filtres.</td></tr>{% endfor %}
+{% else %}<tr><td colspan="11" class="muted">Aucune action ne correspond aux filtres.</td></tr>{% endfor %}
 </table></div>

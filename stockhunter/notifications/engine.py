@@ -66,10 +66,17 @@ def trade_alert_text(s, ev: PaperTradeEvent) -> str:
          f"Stratégie(s) : {e(t.strategies or '-')} · score {sc.total:.0f}/100" if sc else "", ""]
     if ev.kind == "PLANNED":
         r = t.stop_initial_offset
-        L += [f"Entrée conditionnelle : ouverture de demain entre {t.entry_min:.2f} et {t.entry_max:.2f} $",
+        el = json.loads(t.plan_json).get("eligibilite") or {}
+        L += [f"Dernier cours : {t.signal_close:.2f} $ (clôture du {t.signal_date:%d/%m/%Y}, pas un cours en direct)",
+              f"Entrée conditionnelle : ouverture de la séance suivante entre {t.entry_min:.2f} et {t.entry_max:.2f} $",
               "Invalidation : ouverture hors de cette zone",
-              f"Stop : entrée − {r:.2f} $ (2×ATR) · TP1 : entrée + {1.5 * r:.2f} $ · TP2 : entrée + {3 * r:.2f} $",
-              "Risque : 0,5 % du capital simulé · ratio gain/risque TP2 : 3 R (avant frais)"]
+              f"Stop : entrée − {r:.2f} $ (2×ATR) · TP1 : entrée + {1.5 * r:.2f} $ · TP2 : entrée + {3 * r:.2f} $"]
+        if el:
+            L += [f"Éligibilité : <b>{e(el.get('statut', ''))}</b> · quantité {el.get('quantite_executable')} "
+                  f"(max risque {el.get('quantite_max_risque')}, max achat {el.get('quantite_max_achat')}) · risque estimé "
+                  f"{el.get('perte_max_estimee', 0):.2f} $ frais compris (budget {el.get('budget_risque', 0):.2f} $) · "
+                  f"{e(el.get('tp1', ''))}"]
+        L += ["Validation : stratégie NON validée statistiquement (recherche)"]
         if sc:
             pos, neg = json.loads(sc.reasons_pos_json)[:3], json.loads(sc.reasons_neg_json)[:2]
             if pos:
@@ -85,6 +92,36 @@ def trade_alert_text(s, ev: PaperTradeEvent) -> str:
             L += [f"Résultat simulé : {money(t.realized_pnl - t.costs)} $ (frais inclus)"]
     L += ["", "<i>Simulation (paper trading) d'une stratégie NON validée. Aucun ordre réel, pas un conseil.</i>"]
     return "\n".join(x for x in L if x is not None)
+
+
+def decision_alert_text(d) -> str:
+    """Opportunité évaluée mais NON éligible au portefeuille simulé (3.4) : envoyée une seule fois par jeu de
+    conditions (empreinte) ; une répétition à l'identique n'est jamais renvoyée."""
+    return "\n".join(x for x in [
+        "<b>STOCKHUNTER AI — OPPORTUNITÉ NON ÉLIGIBLE</b>", f"Action : <b>{e(d.symbol)}</b> · stratégie(s) {e(d.strategy or '-')} "
+        f"(NON validée statistiquement)",
+        f"Dernier cours : {d.ref_price:.2f} $ (clôture du {d.signal_date:%d/%m/%Y}, pas un cours en direct)" if d.ref_price else None,
+        (f"Plan qui aurait été suivi : entrée {d.entry_min:.2f}–{d.entry_max:.2f} $, stop entrée − {d.stop_offset:.2f} $, "
+         f"TP1 + {1.5 * d.stop_offset:.2f} $, TP2 + {3 * d.stop_offset:.2f} $") if d.stop_offset else None,
+        (f"Risque par action {d.risk_per_share:.2f} $ frais compris · budget {d.risk_budget:.2f} $ · quantité max risque "
+         f"{d.qty_risk} · max achat {d.qty_cash}") if d.risk_per_share else None,
+        f"Statut : <b>{e(d.status)}</b> — {e(d.reason or '')}",
+        "<i>Aucun plan créé. Réévalué automatiquement si le capital, le cours, le stop, les paramètres ou le portefeuille "
+        "changent. Simulation : aucun ordre réel.</i>"] if x)
+
+
+def enqueue_decision_alerts(engine: Engine) -> int:
+    from stockhunter.db.models import PaperDecision
+    n = 0
+    with session_scope(engine) as s:
+        rows = list(s.scalars(select(PaperDecision).where(PaperDecision.repeat_of.is_(None),
+                                                          PaperDecision.status != "ÉLIGIBLE",
+                                                          PaperDecision.status != "EN ATTENTE")
+                              .order_by(PaperDecision.id)))
+        texts = [(d.fingerprint, decision_alert_text(d)) for d in rows]
+    for fp, text in texts:
+        n += enqueue(engine, "trade", f"paper-decision:{fp}", text)
+    return n
 
 
 def enqueue_trade_events(engine: Engine) -> int:
@@ -371,6 +408,7 @@ def run_notifications(engine: Engine, settings: Settings, kind: str, now: dateti
             except Exception as exc:                   # le résumé mondial ne bloque jamais le rapport US
                 out["monde"] = f"indisponible : {type(exc).__name__}"
     out["alertes_trading"] = enqueue_trade_events(engine)
+    out["alertes_eligibilite"] = enqueue_decision_alerts(engine)
     out["alertes_catalyseurs"] = enqueue_catalyst_alerts(engine)
     out["alertes_systeme"] = enqueue_system_alerts(engine, now)
     out["commandes"] = process_commands(engine, client)

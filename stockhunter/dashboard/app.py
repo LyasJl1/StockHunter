@@ -175,7 +175,8 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
         ms = float(min_score) if min_score.replace(".", "", 1).isdigit() else None
         meta, rows = queries.score_rows(engine, sts, strategy or None, ms, q or None)
         name = "_opportunities_table.html" if request.headers.get("HX-Request") else "opportunities.html"
-        return render(request, name, sess, meta=meta, rows=rows,
+        elig = paper.eligibility_view(engine, [r["symbol"] for r in rows if r["status"] in ("READY", "DEVELOPING")][:60])
+        return render(request, name, sess, meta=meta, rows=rows, elig=elig,
                       f={"status": status, "strategy": strategy, "min_score": min_score, "q": q})
 
     @app.get("/stock/{symbol}", response_class=HTMLResponse)
@@ -193,12 +194,26 @@ def create_app(engine: Engine, settings: Settings, secret: str | None = None, pa
         return JSONResponse(queries.price_series(engine, symbol))
 
     @app.get("/portfolio", response_class=HTMLResponse)
-    def portfolio_page(request: Request, tab: str = "paper", error: str | None = None):
+    def portfolio_page(request: Request, tab: str = "paper", error: str | None = None, since: str = "",
+                       symbol: str = "", strategy: str = "", status: str = "", reason: str = "", kind: str = ""):
         sess = guard(request)
         cfg = paper.load_config(engine)
+        try:
+            since_d = date.fromisoformat(since) if since else None
+        except ValueError:
+            since_d = None
+        f = {"since": since[:10], "symbol": symbol[:12], "strategy": strategy[:20], "status": status[:40],
+             "reason": reason[:60], "kind": kind[:12]}
+        journal = _v3().decision_journal(engine) if tab == "paper" else []
+        journal = [j for j in journal if (not since_d or j["date"] >= since_d) and (not f["symbol"] or j["symbol"] == f["symbol"].upper())
+                   and (not f["kind"] or j["kind"] == f["kind"]) and (not f["reason"] or f["reason"] in (j["detail"] or ""))]
+        decs = paper.decisions(engine, since_d, f["symbol"] or None, f["strategy"] or None, f["status"] or None,
+                               f["reason"] or None) if tab == "paper" else []
         return render(request, "portfolio.html", sess, tab=tab, error=error, pf=paper.summary(engine, cfg), cfg=cfg,
-                      real=manual.portfolio(engine, settings.market_dir), today=date.today(),
-                      journal=_v3().decision_journal(engine) if tab == "paper" else [])
+                      real=manual.portfolio(engine, settings.market_dir), today=date.today(), journal=journal,
+                      decs=decs, f=f, st=paper.stats(engine, cfg) if tab == "paper" else {},
+                      statuses=[paper.ELIGIBLE, paper.NE_RISK, paper.NE_CAPITAL, paper.NE_EXPO, paper.NE_CORR,
+                                paper.WAITING, paper.NO_DATA])
 
     @app.post("/portfolio/transactions")
     def add_tx(request: Request, csrf: str = Form(""), symbol: str = Form(...), trade_date: str = Form(...),

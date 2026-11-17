@@ -281,6 +281,14 @@ def cmd_research(settings, engine, args) -> int:
 
 def cmd_paper(settings, engine, args) -> int:
     from stockhunter.portfolio import paper
+    if args.action == "audit":                       # 3.4 : lecture seule, aucune écriture
+        from stockhunter.portfolio import audit as pa
+        print(pa.main(engine))
+        return 0
+    if args.action == "replay":                      # 3.4 : COPIE locale jetable uniquement (refus sinon)
+        from stockhunter.portfolio import replay as rp
+        print(rp.main(engine))
+        return 0
     if args.action == "run":
         cfg = paper.load_config(engine)
         created = paper.plan_from_scan(engine, cfg=cfg)
@@ -290,8 +298,12 @@ def cmd_paper(settings, engine, args) -> int:
     wr = "N/D" if sm["win_rate"] is None else f"{sm['win_rate']:.0%}"
     print(f"Portefeuille SIMULÉ : valeur {sm['equity']:,.0f} $ (capital {sm['capital']:,.0f} $), réalisé "
           f"{sm['realized']:+,.0f} $, latent {sm['unrealized']:+,.0f} $".replace(",", " "))
-    print(f"Trades : {sm['trades_total']} (plans {sm['planned']}, ouverts {sm['open']}, clos {sm['closed']}, "
-          f"annulés {sm['cancelled']}) ; gagnants {wr}")
+    pl, ex = sm["plans"], sm["executions"]
+    print(f"Plans : {pl['crees']} (en attente {pl['en_attente']}, exécutés {pl['executes']}, annulés {pl['annules']}, "
+          f"expirés {pl['expires']}) — un plan n'est pas un trade")
+    print(f"Positions : {sm['open']} ouverte(s), {sm['closed']} clôturée(s) ; exécutions : {ex['achats']} achat(s), "
+          f"{ex['ventes']} vente(s), {ex['ajustements_stop']} ajustement(s) de stop ; frais {sm['performance']['frais']:.2f} $ ; "
+          f"gagnants {wr}")
     for p_ in sm["positions"]:
         print(f"  {p_['symbol']:6} {p_['shares']:g} @ {p_['entry']:.2f} depuis {p_['entry_date']} → {p_['last']} "
               f"({p_['last_date']}) stop {p_['stop']:.2f} TP1 {p_['tp1']:.2f} TP2 {p_['tp2']:.2f}")
@@ -726,7 +738,7 @@ def add_parsers(sub) -> dict:
     rs.add_argument("--allow-holdout-again", action="store_true")
     rs.add_argument("--out")
     pp = sub.add_parser("paper", help="portefeuille simulé (paper trading)")
-    pp.add_argument("action", choices=["run", "status"])
+    pp.add_argument("action", choices=["run", "status", "audit", "replay"])
     fw = sub.add_parser("forward", help="test prospectif des facteurs pré-enregistrés")
     fw.add_argument("action", choices=["record", "report"])
     nt = sub.add_parser("notify", help="rapport quotidien et alertes Telegram")
