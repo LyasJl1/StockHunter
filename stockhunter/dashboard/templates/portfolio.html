@@ -9,8 +9,19 @@
   <div class="card"><h2>Valeur simulée</h2><div class="kpi">{{ pf.equity|num(0) }} $</div><div class="sub">capital de départ {{ pf.capital|num(0) }} $</div></div>
   <div class="card"><h2>Réalisé (net de frais)</h2><div class="kpi {{ 'pos' if pf.realized>0 else ('neg' if pf.realized<0) }}">{{ pf.realized|num(0) }} $</div></div>
   <div class="card"><h2>Latent</h2><div class="kpi">{{ pf.unrealized|num(0) }} $</div></div>
-  <div class="card"><h2>Trades</h2><div class="kpi">{{ pf.trades_total }}</div><div class="sub">{{ pf.planned }} plans · {{ pf.open }} ouverts · {{ pf.closed }} clos · {{ pf.cancelled }} annulés</div></div>
+  <div class="card"><h2>Frais payés</h2><div class="kpi">{{ pf.performance.frais|num(2) }} $</div><div class="sub">courtage {{ cfg.cost_bps|num(0) }} pb par exécution ; glissement {{ cfg.slippage_bps|num(0) }} pb inclus dans les prix</div></div>
 </div>
+<div class="grid g4" style="margin-top:12px">
+  <div class="card"><h2>Plans</h2><div class="kpi">{{ pf.plans.crees }}</div><div class="sub">{{ pf.plans.en_attente }} en attente · {{ pf.plans.executes }} exécutés · {{ pf.plans.annules }} annulés · {{ pf.plans.expires }} expirés</div></div>
+  <div class="card"><h2>Positions</h2><div class="kpi">{{ pf.positions_resume.ouvertes }} ouverte(s)</div><div class="sub">{{ pf.positions_resume.cloturees }} clôturée(s) · {{ pf.positions_resume.partiellement_cloturees }} partiellement clôturée(s)</div></div>
+  <div class="card"><h2>Exécutions simulées</h2><div class="kpi">{{ pf.executions.achats + pf.executions.ventes }}</div><div class="sub">{{ pf.executions.achats }} achat(s) · {{ pf.executions.ventes }} vente(s) · {{ pf.executions.ajustements_stop }} ajustement(s) de stop</div></div>
+  <div class="card"><h2>Opportunités évaluées</h2><div class="kpi">{{ pf.decisions.par_statut.values()|sum }}</div><div class="sub">{% for k, n in pf.decisions.par_statut.items() %}{{ k }} : {{ n }}{{ ' · ' if not loop.last }}{% endfor %} · {{ pf.decisions.repetitions_sans_nouveau_plan }} répétition(s) sans nouveau plan</div></div>
+</div>
+<p class="sub">Un plan annulé ou refusé n'est jamais compté comme un trade : seuls les achats et ventes simulés sont des exécutions.</p>
+<div class="card" style="margin-top:16px"><h2>Statistiques prospectives</h2>
+<table><tr><th>Trades clôturés</th><th>Réussite</th><th>Gain moyen</th><th>Perte moyenne</th><th>Espérance</th><th>Profit factor</th><th>Drawdown max</th><th>Durée moyenne</th><th>Exposition moyenne</th><th>Net vs SPY</th></tr>
+<tr><td>{{ st.trades_clotures }}</td><td>{{ st.taux_reussite|pct(0, false) }}</td><td>{{ st.gain_moyen|num(2) }}</td><td>{{ st.perte_moyenne|num(2) }}</td><td>{{ st.esperance_r|num(2) }} R</td><td>{{ st.profit_factor|num(2) }}</td><td>{{ st.drawdown_max|pct }}</td><td>{{ st.duree_moyenne_seances|num(1) }} séances</td><td>{{ st.exposition_moyenne|pct(0, false) }}</td><td>{{ st.net_vs_spy|pct }}</td></tr></table>
+<p class="sub"><b>Limites :</b> {{ st.conclusion }} · {{ st.statut_validation }} · rendement annualisé {{ st.rendement_annualise|pct if st.rendement_annualise is not none else 'N/D (moins d\'un an)' }}.</p></div>
 <div class="card" style="margin-top:16px"><h2>Positions ouvertes</h2><table>
 <tr><th>Action</th><th class="r">Quantité</th><th class="r">Entrée</th><th class="r">Dernière clôture</th><th class="r">Latent</th><th class="r">Stop</th><th class="r">TP1</th><th class="r">TP2</th></tr>
 {% for p in pf.positions %}<tr><td><a href="/stock/{{ p.symbol }}"><b>{{ p.symbol }}</b></a><div class="sub">depuis le {{ p.entry_date }}</div></td>
@@ -19,6 +30,21 @@
 <td class="r">{{ p.tp1|num }}{{ ' ✓' if p.tp1_done }}</td><td class="r">{{ p.tp2|num }}</td></tr>
 {% else %}<tr><td colspan="8" class="muted">Aucune position ouverte.</td></tr>{% endfor %}</table>
 <p class="sub">Règles : risque {{ (cfg.risk_fraction*100)|num(1) }} % du capital par position, {{ cfg.max_positions }} positions max, {{ cfg.max_per_sector }} par secteur, refus si corrélation 60 j > {{ cfg.max_correlation|num(2) }} avec une position ouverte, pas de levier, frais {{ cfg.cost_bps|num(0) }} pb + glissement {{ cfg.slippage_bps|num(0) }} pb. Modifiables dans Réglages. Mêmes règles que le backtest.</p></div>
+<div class="card" style="margin-top:16px"><h2>Éligibilité des opportunités (journal immuable)</h2>
+<form class="filters" method="get" action="/portfolio"><input type="hidden" name="tab" value="paper">
+<input type="date" name="since" value="{{ f.since }}"><input name="symbol" placeholder="Action" value="{{ f.symbol }}" size="7">
+<input name="strategy" placeholder="Stratégie" value="{{ f.strategy }}" size="7">
+<select name="status"><option value="">Tous statuts</option>{% for x in statuses %}<option {{ 'selected' if f.status == x }}>{{ x }}</option>{% endfor %}</select>
+<input name="reason" placeholder="Motif contient…" value="{{ f.reason }}" size="14">
+<select name="kind"><option value="">Tous événements</option>{% for k in ['PLANNED','OPENED','CANCELLED','TP1','CLOSED','STOP_MOVED'] %}<option {{ 'selected' if f.kind == k }}>{{ k }}</option>{% endfor %}</select>
+<button>Filtrer</button></form>
+<table><tr><th>Signal</th><th>Action</th><th>Stratégie</th><th>Statut</th><th class="r">Cours de référence</th><th class="r">Risque / action</th><th class="r">Budget</th><th class="r">Capital dispo.</th><th class="r">Qté risque · achat · exécutable</th><th class="r">Risque max</th><th>Motif</th></tr>
+{% for d in decs %}<tr class="{{ 'muted' if d.repeat_of }}"><td>{{ d.signal_date|d }}</td><td><b>{{ d.symbol }}</b></td><td>{{ d.strategy }}</td>
+<td class="{{ 'pos' if d.status == 'ÉLIGIBLE' else 'neg' }}">{{ d.status }}{% if d.repeat_of %}<div class="sub">répétition de #{{ d.repeat_of }} : aucun nouveau plan, aucune alerte</div>{% endif %}</td>
+<td class="r">{{ d.ref_price|num }}</td><td class="r">{{ d.risk_per_share|num(2) }}</td><td class="r">{{ d.risk_budget|num(2) }}</td><td class="r">{{ d.cash|num(0) }}</td>
+<td class="r">{{ d.qty_risk if d.qty_risk is not none else '—' }} · {{ d.qty_cash if d.qty_cash is not none else '—' }} · <b>{{ d.qty_exec }}</b></td><td class="r">{{ d.max_loss|num(2) if d.max_loss else '—' }}</td><td class="sub">{{ d.reason or '' }}</td></tr>
+{% else %}<tr><td colspan="11" class="muted">Aucune évaluation enregistrée (les évaluations commencent avec la version 3.4).</td></tr>{% endfor %}</table>
+<p class="sub">quantité_max_risque = floor(budget de risque ÷ risque par action tous frais compris) ; quantité exécutable = min(risque, pouvoir d'achat, limites du portefeuille). Mêmes formules à l'exécution, avec l'ouverture réelle.</p></div>
 <div class="card" style="margin-top:16px"><h2>Journal de décision (immuable)</h2><table>
 <tr><th>Date</th><th>Action</th><th>Événement</th><th class="r">Prix</th><th class="r">Quantité</th><th>Pourquoi</th></tr>
 {% for j in journal %}<tr><td>{{ j.date|d }}</td><td><a href="/stock/{{ j.symbol }}"><b>{{ j.symbol }}</b></a></td>

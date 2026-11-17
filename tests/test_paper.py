@@ -80,14 +80,16 @@ def test_full_lifecycle_tp1_then_breakeven_stop(engine):
     ])
     paper.process(engine, NOSLIP)
     t = trade(engine, ids["ZZA"])
-    # risque 0,5 % de 100 000 = 500 $ / 4 $ = 125 actions
+    # 3.4 : risque 0,5 % de 100 000 = 500 $ ÷ risque par action TOUS FRAIS COMPRIS (4 $ + 0,10 $ de frais d'entrée
+    # + 0,096 $ de frais de sortie au stop = 4,196 $) = 119 actions (125 avant 3.4, risque réel 524 $ > 500 $)
     assert t.status == "CLOSED" and t.entry_price == 100 and t.tp1_done
-    assert t.realized_pnl == pytest.approx(62 * 6.0)             # 62 actions vendues +6 $, 63 au prix d'entrée
+    assert t.shares == 0 and t.initial_risk == pytest.approx(119 * 4)
+    assert t.realized_pnl == pytest.approx(59 * 6.0)             # 59 actions vendues +6 $, 60 au prix d'entrée
     assert kinds(engine, t.id) == ["PLANNED", "OPENED", "TP1", "STOP_MOVED", "STOP_MOVED", "CLOSED"]
     paper.process(engine, NOSLIP)                                 # idempotent : rien de nouveau
     assert kinds(engine, t.id) == ["PLANNED", "OPENED", "TP1", "STOP_MOVED", "STOP_MOVED", "CLOSED"]
     sm = paper.summary(engine)
-    assert sm["closed"] == 1 and sm["equity"] == pytest.approx(100_000 + 372 - t.costs)
+    assert sm["closed"] == 1 and sm["equity"] == pytest.approx(100_000 + 354 - t.costs)
 
 
 def test_gap_below_stop_fills_at_open(engine):
@@ -96,7 +98,7 @@ def test_gap_below_stop_fills_at_open(engine):
     bars(engine, src, ids["ZZA"], [("2026-11-03", 100, 101, 99, 100), ("2026-11-04", 90, 92, 89, 91)])
     paper.process(engine, NOSLIP)
     t = trade(engine, ids["ZZA"])
-    assert t.status == "CLOSED" and "gap" in t.close_reason and t.realized_pnl == pytest.approx(-10 * 125)
+    assert t.status == "CLOSED" and "gap" in t.close_reason and t.realized_pnl == pytest.approx(-10 * 119)
 
 
 def test_ambiguous_bar_assumes_stop_first(engine):
@@ -115,10 +117,13 @@ def test_sector_limit_and_split(engine):
         bars(engine, src, ids[sym], [("2026-11-03", 100, 101, 99, 100), ("2026-11-04", 50, 50.5, 49.5, 50, 2.0)])
     cfg = PaperConfig(max_per_sector=2, slippage_bps=0.0)
     paper.process(engine, cfg)
-    a, c = trade(engine, ids["ZZA"]), trade(engine, ids["ZZC"])
-    assert c.status == "CANCELLED" and "secteur" in c.close_reason
-    assert a.status == "OPEN" and a.shares == 250 and a.entry_price == 50 and a.stop == 48   # split 2:1
-    assert a.atr_at_signal == 1.0 and a.initial_risk == pytest.approx(500)   # ATR ajusté, risque en $ inchangé
+    a = trade(engine, ids["ZZA"])
+    with session_scope(engine) as s:                       # 3.4 : limite sectorielle vérifiée DÈS le plan
+        assert s.scalar(select(PaperTrade).where(PaperTrade.instrument_id == ids["ZZC"])) is None
+        dec = s.scalar(select(paper.PaperDecision).where(paper.PaperDecision.instrument_id == ids["ZZC"]))
+        assert dec.status == paper.NE_EXPO and "secteur" in dec.reason
+    assert a.status == "OPEN" and a.shares == 238 and a.entry_price == 50 and a.stop == 48   # 119 actions, split 2:1
+    assert a.atr_at_signal == 1.0 and a.initial_risk == pytest.approx(476)   # ATR ajusté, risque en $ inchangé
     # non-régression : la courbe de capital ne doit PAS voir de gain/perte fictif le jour du split
     spy = Instrument(symbol="SPY", asset_type="etf")
     with session_scope(engine) as s:
@@ -128,7 +133,10 @@ def test_sector_limit_and_split(engine):
             s.add(PriceBar(instrument_id=spy.id, source_id=src, bar_date=date.fromisoformat(d), open=1, high=1, low=1,
                            close=1, volume=1))
     curve = paper.equity_curve(engine, cfg)
-    costs = (125 + 124) * 100 * 10 / 1e4                  # deux positions ouvertes (125 et 124 actions), frais d'entrée
+    with session_scope(engine) as s:
+        n_b = s.scalar(select(PaperTradeEvent.shares).join(PaperTrade, PaperTrade.id == PaperTradeEvent.trade_id)
+                       .where(PaperTrade.instrument_id == ids["ZZB"], PaperTradeEvent.kind == "OPENED"))
+    costs = (119 + n_b) * 100 * 10 / 1e4                  # deux positions ouvertes, frais d'entrée
     assert [round(x["equity"], 2) for x in curve] == [100_000 - costs, 100_000 - costs]
 
 
@@ -197,8 +205,12 @@ def test_correlated_position_is_refused(engine):
     for sym in ids:
         bars(engine, src, ids[sym], [("2026-11-03", 100, 101, 99, 100)])
     paper.process(engine, NOSLIP)
-    a, b = trade(engine, ids["ZZA"]), trade(engine, ids["ZZB"])
-    assert a.status == "OPEN" and b.status == "CANCELLED" and "corrélée" in b.close_reason
+    a = trade(engine, ids["ZZA"])
+    with session_scope(engine) as s:                       # 3.4 : corrélation vérifiée dès le plan (plan actif ZZA)
+        assert s.scalar(select(PaperTrade).where(PaperTrade.instrument_id == ids["ZZB"])) is None
+        dec = s.scalar(select(paper.PaperDecision).where(paper.PaperDecision.instrument_id == ids["ZZB"]))
+        assert dec.status == paper.NE_CORR and dec.max_corr > 0.99
+    assert a.status == "OPEN"
 
 
 def _two_trade_scenario(engine):

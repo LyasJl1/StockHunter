@@ -83,7 +83,9 @@ def simulate(p: Panel, score: pd.DataFrame, mask: pd.DataFrame, signal_dates: pd
                 invested = sum(q.shares * q.entry_price for _s, q in opened)
                 realized = sum(q.realized - q.costs for q in live.values()) + sum(q.realized - q.costs for _s, q in done)
                 basis = pp.capital + realized
-                return risk_size(basis, pp.risk_fraction, basis * pp.max_exposure - invested)(fill, off)
+                # 3.4 : même dimensionnement que le paper trading (risque tous frais compris)
+                return risk_size(basis, pp.risk_fraction, basis * pp.max_exposure - invested,
+                                 rules.cost_bps, rules.slippage_bps)(fill, off)
 
             for ev in step(pos, Bar(d.date(), float(o), float(h), float(lo), float(c)), size, rules):
                 if ev.kind == "OPENED":

@@ -294,8 +294,12 @@ def cmd_paper(settings, engine, args) -> int:
     wr = "N/D" if sm["win_rate"] is None else f"{sm['win_rate']:.0%}"
     print(f"Portefeuille SIMULÉ : valeur {sm['equity']:,.0f} $ (capital {sm['capital']:,.0f} $), réalisé "
           f"{sm['realized']:+,.0f} $, latent {sm['unrealized']:+,.0f} $".replace(",", " "))
-    print(f"Trades : {sm['trades_total']} (plans {sm['planned']}, ouverts {sm['open']}, clos {sm['closed']}, "
-          f"annulés {sm['cancelled']}) ; gagnants {wr}")
+    pl, ex = sm["plans"], sm["executions"]
+    print(f"Plans : {pl['crees']} (en attente {pl['en_attente']}, exécutés {pl['executes']}, annulés {pl['annules']}, "
+          f"expirés {pl['expires']}) — un plan n'est pas un trade")
+    print(f"Positions : {sm['open']} ouverte(s), {sm['closed']} clôturée(s) ; exécutions : {ex['achats']} achat(s), "
+          f"{ex['ventes']} vente(s), {ex['ajustements_stop']} ajustement(s) de stop ; frais {sm['performance']['frais']:.2f} $ ; "
+          f"gagnants {wr}")
     for p_ in sm["positions"]:
         print(f"  {p_['symbol']:6} {p_['shares']:g} @ {p_['entry']:.2f} depuis {p_['entry_date']} → {p_['last']} "
               f"({p_['last_date']}) stop {p_['stop']:.2f} TP1 {p_['tp1']:.2f} TP2 {p_['tp2']:.2f}")

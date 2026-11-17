@@ -167,9 +167,12 @@ def step(p: Position, b: Bar, size: SizeFn, r: Rules = Rules()) -> list[Event]:
         _sell(p, b.date, px, p.shares, r, "CLOSED", f"{label} touché à {p.stop:.2f} $")
     else:
         if not p.tp1_done and b.high >= p.tp1:
-            qty = math.floor(p.shares * r.tp1_fraction) or p.shares
+            part = math.floor(p.shares * r.tp1_fraction)
+            qty = part or p.shares
             px = max(p.tp1, b.open) if not entered_today else p.tp1
-            _sell(p, b.date, px, qty, r, "TP1", f"TP1 atteint : vente de {qty:g} actions à {px:.2f} $ ; "
+            how = (f"vente de {qty:g} action(s) sur {p.shares:g}" if part else
+                   f"prise partielle impossible avec {p.shares:g} action : vente TOTALE (règle annoncée au plan)")
+            _sell(p, b.date, px, qty, r, "TP1", f"TP1 atteint : {how} à {px:.2f} $ ; "
                                                    f"stop au prix d'entrée à partir de la séance suivante")
             p.tp1_done = True
         if p.status == "OPEN" and b.high >= p.tp2:
@@ -188,12 +191,33 @@ def step(p: Position, b: Bar, size: SizeFn, r: Rules = Rules()) -> list[Event]:
     return p.events[n0:]
 
 
-def risk_size(equity: float, risk_fraction: float, room: float) -> SizeFn:
-    """Taille au risque : quantité = (capital × risque) ÷ distance du stop, plafonnée par l'exposition restante."""
+def risk_per_share(fill: float, stop_offset: float, cost_bps: float = 0.0, slippage_bps: float = 0.0) -> float:
+    """Perte par action si le stop initial est touché, TOUS FRAIS COMPRIS (3.4) : distance du stop + frais
+    d'entrée + glissement et frais de sortie au stop. Avec frais et glissement nuls : la distance du stop seule."""
+    stop_px = fill - stop_offset
+    return stop_offset + fill * cost_bps / 1e4 + stop_px * (cost_bps + slippage_bps) / 1e4
+
+
+RISK_REFUSAL = "NON ÉLIGIBLE — RISQUE"
+CAPITAL_REFUSAL = "NON ÉLIGIBLE — CAPITAL"
+
+
+def risk_size(equity: float, risk_fraction: float, room: float, cost_bps: float = 0.0,
+              slippage_bps: float = 0.0) -> SizeFn:
+    """Taille au risque : quantité = floor(budget de risque ÷ risque par action tous frais compris), plafonnée par
+    le pouvoir d'achat (`room`, frais d'entrée compris). Jamais plus que le risque maximal (pas de levier).
+    `cost_bps = slippage_bps = 0` : comportement historique (laboratoire, backtests antérieurs) inchangé."""
     def size(fill: float, stop_offset: float) -> tuple[float, str | None]:
-        shares = math.floor(equity * risk_fraction / stop_offset) if stop_offset > 0 else 0
-        capped = min(shares, math.floor(max(room, 0.0) / fill))
+        budget = equity * risk_fraction
+        rps = risk_per_share(fill, stop_offset, cost_bps, slippage_bps) if stop_offset > 0 else 0
+        shares = math.floor(budget / rps + 1e-9) if rps > 0 else 0
+        buy = fill * (1 + cost_bps / 1e4)
+        capped = min(shares, math.floor(max(room, 0.0) / buy + 1e-9))
         if capped < 1:
-            return 0, "exposition maximale atteinte (pas de levier)" if shares >= 1 else "risque par position trop faible pour une action"
+            if shares >= 1:
+                return 0, (f"{CAPITAL_REFUSAL} : pouvoir d'achat {max(room, 0):.2f} $ < une action à {buy:.2f} $ "
+                           "(pas de levier)")
+            return 0, (f"{RISK_REFUSAL} : une seule action risque {rps:.2f} $ tous frais compris, au-delà du budget "
+                       f"de {budget:.2f} $ ({risk_fraction:.2%} du capital)")
         return capped, None
     return size

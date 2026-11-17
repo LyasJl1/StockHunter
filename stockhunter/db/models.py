@@ -716,3 +716,44 @@ class WorldArchive(Base):
     manifest_json: Mapped[str] = mapped_column(Text)        # entrée du manifeste (source, horodatage de collecte…)
     blob: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PaperDecision(Base):
+    """3.4 : journal IMMUABLE des évaluations d'éligibilité d'une opportunité au portefeuille simulé (une ligne par
+    signal évalué ; jamais modifiée ni supprimée). `repeat_of` pointe vers la décision antérieure identique
+    (mêmes conditions importantes) : la répétition est tracée, mais ne recrée ni plan ni alerte."""
+
+    __tablename__ = "paper_decisions"
+    __table_args__ = (UniqueConstraint("scan_run_id", "instrument_id", name="uq_paper_decision"),
+                      Index("ix_paper_decision_fp", "fingerprint"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"))
+    symbol: Mapped[str] = mapped_column(String(20))
+    strategy: Mapped[str] = mapped_column(String(40))
+    signal_date: Mapped[date] = mapped_column(Date)
+    engine_version: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(40))          # ÉLIGIBLE | NON ÉLIGIBLE — RISQUE | … | DONNÉES INSUFFISANTES
+    reason: Mapped[str | None] = mapped_column(String(300))
+    ref_price: Mapped[float | None] = mapped_column(Float)   # clôture de la séance du signal (datée, pas un cours live)
+    entry_min: Mapped[float | None] = mapped_column(Float)
+    entry_max: Mapped[float | None] = mapped_column(Float)
+    stop_offset: Mapped[float | None] = mapped_column(Float)
+    risk_per_share: Mapped[float | None] = mapped_column(Float)   # tous frais compris
+    risk_budget: Mapped[float | None] = mapped_column(Float)
+    equity_basis: Mapped[float | None] = mapped_column(Float)
+    cash: Mapped[float | None] = mapped_column(Float)
+    qty_risk: Mapped[int | None] = mapped_column(Integer)
+    qty_cash: Mapped[int | None] = mapped_column(Integer)
+    qty_exec: Mapped[int | None] = mapped_column(Integer)
+    max_loss: Mapped[float | None] = mapped_column(Float)    # perte estimée au stop pour qty_exec, frais compris
+    fees_est: Mapped[float | None] = mapped_column(Float)    # frais + glissement estimés aller-retour au stop
+    sector: Mapped[str | None] = mapped_column(String(20))
+    max_corr: Mapped[float | None] = mapped_column(Float)
+    params_hash: Mapped[str] = mapped_column(String(16))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    repeat_of: Mapped[int | None] = mapped_column(Integer)
+    trade_id: Mapped[int | None] = mapped_column(Integer)    # plan créé (ÉLIGIBLE seulement)
+    detail_json: Mapped[str] = mapped_column(Text)
