@@ -285,12 +285,14 @@ def test_13_eligibility_uses_only_information_known_at_signal(engine, tmp_path):
 
 # --------------------------------------------------------------------------- rejeu avant / après (base jetable)
 def test_replay_refuses_non_local_database_and_replays_chronologically(engine):
+    from types import SimpleNamespace
+
     import pytest
-    from sqlalchemy import create_engine
+    from sqlalchemy.engine import make_url
 
     from stockhunter.portfolio import replay
-    with pytest.raises(SystemExit):
-        replay.replay(create_engine("postgresql+psycopg://u@db.example.com:5432/prod"))
+    with pytest.raises(SystemExit):                                  # sans pilote : seule l'URL est examinée
+        replay.replay(SimpleNamespace(url=make_url("postgresql://u@db.example.com:5432/prod")))
     src, ids, run = setup(engine, close=500.0, atr_pct=0.04)       # refusée à chaque scan
     with session_scope(engine) as s:                                 # état « avant » de l'ancien code : un plan annulé
         sv = s.scalars(select(ScanRun)).first().strategy_version_id
