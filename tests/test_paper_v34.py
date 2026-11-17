@@ -9,7 +9,7 @@ from datetime import date
 
 from sqlalchemy import func, select
 
-from stockhunter.db.models import (Base, Instrument, NotificationLog, PaperDecision, PaperTrade, PaperTradeEvent,
+from stockhunter.db.models import (Base, NotificationLog, PaperDecision, PaperTrade, PaperTradeEvent,
                                    PriceBar, ScanRun, Score)
 from stockhunter.db.session import get_engine, session_scope
 from stockhunter.notifications import engine as notif
@@ -281,3 +281,37 @@ def test_13_eligibility_uses_only_information_known_at_signal(engine, tmp_path):
     other = get_engine(f"sqlite:///{tmp_path / 'future.db'}")
     Base.metadata.create_all(other)
     assert run_case(engine, False) == run_case(other, True)
+
+
+# --------------------------------------------------------------------------- rejeu avant / après (base jetable)
+def test_replay_refuses_non_local_database_and_replays_chronologically(engine):
+    import pytest
+    from sqlalchemy import create_engine
+
+    from stockhunter.portfolio import replay
+    with pytest.raises(SystemExit):
+        replay.replay(create_engine("postgresql+psycopg://u@db.example.com:5432/prod"))
+    src, ids, run = setup(engine, close=500.0, atr_pct=0.04)       # refusée à chaque scan
+    with session_scope(engine) as s:                                 # état « avant » de l'ancien code : un plan annulé
+        sv = s.scalars(select(ScanRun)).first().strategy_version_id
+        s.add(PaperTrade(instrument_id=ids["ZZA"], scan_run_id=run, strategy_version_id=sv, signal_date=SIG,
+                         status="CANCELLED", signal_close=500, atr_at_signal=20, entry_min=480, entry_max=515,
+                         stop_initial_offset=40, risk_fraction=0.005, strategies="B", plan_json="{}",
+                         close_reason="risque par position trop faible pour une action"))
+        from stockhunter.db.models import KeyValue
+        s.add(KeyValue(key="paper_config", value=json.dumps({"capital": 5000.0})))
+    new_scan(engine, src, ids, date(2026, 11, 3), close=500.0, atr_pct=0.04)
+    out = replay.replay(engine)
+    assert out["avant"]["plans_generes"] == 1 and out["apres"]["plans_generes"] == 0
+    assert out["apres"]["evaluations"] == 2 and out["apres"]["repetitions_sans_nouveau_plan"] == 1
+    assert out["scans_rejoues"] == ["2026-11-02", "2026-11-03"]
+
+
+def test_process_until_ignores_later_sessions(engine):
+    src, ids, run = setup(engine)
+    paper.plan_from_scan(engine, run, SMALL0)
+    bars(engine, src, ids["ZZA"], [("2026-11-03", 100, 101, 99, 100), ("2026-11-04", 99, 99.5, 90, 91)])
+    paper.process(engine, SMALL0, until=date(2026, 11, 3))
+    assert trade(engine, ids["ZZA"]).status == "OPEN"
+    paper.process(engine, SMALL0)
+    assert trade(engine, ids["ZZA"]).status == "CLOSED"

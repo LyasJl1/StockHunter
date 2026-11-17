@@ -98,7 +98,7 @@ def decision_alert_text(d) -> str:
     """Opportunité évaluée mais NON éligible au portefeuille simulé (3.4) : envoyée une seule fois par jeu de
     conditions (empreinte) ; une répétition à l'identique n'est jamais renvoyée."""
     return "\n".join(x for x in [
-        f"<b>STOCKHUNTER AI — OPPORTUNITÉ NON ÉLIGIBLE</b>", f"Action : <b>{e(d.symbol)}</b> · stratégie(s) {e(d.strategy or '-')} "
+        "<b>STOCKHUNTER AI — OPPORTUNITÉ NON ÉLIGIBLE</b>", f"Action : <b>{e(d.symbol)}</b> · stratégie(s) {e(d.strategy or '-')} "
         f"(NON validée statistiquement)",
         f"Dernier cours : {d.ref_price:.2f} $ (clôture du {d.signal_date:%d/%m/%Y}, pas un cours en direct)" if d.ref_price else None,
         (f"Plan qui aurait été suivi : entrée {d.entry_min:.2f}–{d.entry_max:.2f} $, stop entrée − {d.stop_offset:.2f} $, "

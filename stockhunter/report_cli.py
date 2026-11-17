@@ -285,6 +285,10 @@ def cmd_paper(settings, engine, args) -> int:
         from stockhunter.portfolio import audit as pa
         print(pa.main(engine))
         return 0
+    if args.action == "replay":                      # 3.4 : COPIE locale jetable uniquement (refus sinon)
+        from stockhunter.portfolio import replay as rp
+        print(rp.main(engine))
+        return 0
     if args.action == "run":
         cfg = paper.load_config(engine)
         created = paper.plan_from_scan(engine, cfg=cfg)
@@ -734,7 +738,7 @@ def add_parsers(sub) -> dict:
     rs.add_argument("--allow-holdout-again", action="store_true")
     rs.add_argument("--out")
     pp = sub.add_parser("paper", help="portefeuille simulé (paper trading)")
-    pp.add_argument("action", choices=["run", "status", "audit"])
+    pp.add_argument("action", choices=["run", "status", "audit", "replay"])
     fw = sub.add_parser("forward", help="test prospectif des facteurs pré-enregistrés")
     fw.add_argument("action", choices=["record", "report"])
     nt = sub.add_parser("notify", help="rapport quotidien et alertes Telegram")

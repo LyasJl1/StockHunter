@@ -1,0 +1,66 @@
+name: Comparaison avant/après 3.4 (copie jetable)
+
+# Mesure l'effet du code 3.4 sur les MÊMES données que la production, SANS toucher la production :
+#  1. pg_dump de la production (lecture seule) ;
+#  2. restauration dans un PostgreSQL éphémère du runner (détruit à la fin du job) ;
+#  3. migrations sur la COPIE, puis `stockhunter paper replay` (refuse toute base non locale).
+# N'imprime que des compteurs et des montants simulés : jamais de chaîne de connexion. Le dump n'est ni mis en
+# cache ni publié en artefact (dépôt public, données sous licence).
+on:
+  workflow_dispatch:
+  push:
+    branches: [stockhunter-v3-4-paper-optimization]
+    paths: [".github/workflows/paper-replay.yml", "docs/v3-4/replay-trigger"]
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    environment: Variables
+    timeout-minutes: 30
+    services:
+      copy:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: throwaway
+        ports: ["5545:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[postgres]"
+      - name: Copie de la production (pg_dump en lecture seule)
+        env:
+          SH_DATABASE_URL: ${{ secrets.SH_DATABASE_URL }}
+        run: |
+          test -n "$SH_DATABASE_URL" || { echo "::error::secret SH_DATABASE_URL absent"; exit 1; }
+          mkdir -p /tmp/copy
+          url=$(python -c "import os;from stockhunter.db.session import normalize_url as n;print(n(os.environ['SH_DATABASE_URL']).replace('postgresql+psycopg://','postgresql://'))")
+          echo "::add-mask::$url"
+          docker run --rm --network host -v /tmp/copy:/b postgres:18 \
+            pg_dump --format=custom --no-owner --no-privileges -f /b/prod.dump "$url"
+          docker run --rm --network host -v /tmp/copy:/b -e PGPASSWORD=throwaway postgres:18 \
+            pg_restore --no-owner --no-privileges -h localhost -p 5545 -U postgres -d postgres /b/prod.dump
+          rm -f /tmp/copy/prod.dump
+      - name: Rejeu sur la copie (code 3.4)
+        env:
+          SH_DATABASE_URL: postgresql://postgres:throwaway@localhost:5545/postgres
+        run: |
+          set -o pipefail
+          stockhunter init-db
+          stockhunter paper replay | tee replay.json
+          python - <<'PY'
+          import json, os
+          r = json.load(open("replay.json"))
+          keys = [k for k in r["avant"] if k not in ("anomalies", "decisions_par_statut")]
+          lines = ["| Mesure | Avant (production) | Après (3.4, mêmes données) |", "|---|---|---|"]
+          lines += [f"| {k} | {r['avant'][k]} | {r['apres'][k]} |" for k in keys]
+          lines += ["", f"Décisions 3.4 par statut : {r['apres']['decisions_par_statut']}",
+                    f"Scans rejoués : {', '.join(r['scans_rejoues'])} ; dernière séance {r['derniere_seance']}"]
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write("\n".join(lines) + "\n")
+          PY

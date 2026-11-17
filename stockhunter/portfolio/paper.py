@@ -348,7 +348,7 @@ STALE_SESSIONS = 10      # sans cotation pendant 10 séances : position valoris�
 PLAN_VALID_SESSIONS = 5  # un plan non exécuté faute de cotation est annulé après 5 séances
 
 
-def process(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER) -> dict[str, int]:
+def process(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER, until: date | None = None) -> dict[str, int]:
     """Applique les séances nouvelles avec les règles partagées `stockhunter.trading.rules`.
 
     Ordre strictement chronologique, séance par séance pour TOUT le portefeuille (jamais un trade entier avant
@@ -365,7 +365,8 @@ def process(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER) -> dict[str, int]:
         for t in trades:
             rows = _bars_after(s, t.instrument_id, t.last_processed or t.signal_date)
             pending[t.id] = {b.bar_date: b for b in rows
-                             if None not in (b.open, b.high, b.low, b.close)}     # barre incomplète : ignorée
+                             if None not in (b.open, b.high, b.low, b.close)      # barre incomplète : ignorée
+                             and (until is None or b.bar_date <= until)}          # rejeu : rien après `until`
 
         def apply(t: PaperTrade, b) -> None:
             pos = to_position(t)
@@ -392,7 +393,8 @@ def process(engine: Engine, cfg: PaperConfig = DEFAULT_PAPER) -> dict[str, int]:
                     apply(t, pending[t.id][d])
 
         # titres sans cotation (suspension, radiation) : ne pas laisser un plan ou une position en suspens
-        latest = s.scalar(select(func.max(PriceBar.bar_date)))
+        latest = s.scalar(select(func.max(PriceBar.bar_date)).where(PriceBar.bar_date <= until) if until else
+                          select(func.max(PriceBar.bar_date)))
         for t in trades:
             if t.status not in ("PLANNED", "OPEN") or latest is None:
                 continue
