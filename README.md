@@ -22,6 +22,12 @@ Yahoo Finance interdit la collecte automatique (conditions §2(d)(ix)) : StockHu
 obtenus légitimement (export Yahoo Finance Gold, courtier, autre source autorisée) s'importent avec
 `stockhunter world import fichiers… --source … --rights "…"` puis sont scannés en mode recherche. Voir `docs/v3-3/`.
 
+## 3.4 — paper trading tenant compte du capital
+Chaque signal READY est évalué une fois avec le capital simulé (risque par action tous frais compris, pouvoir
+d'achat, exposition, secteur, corrélation) ; un plan n'est créé que s'il est ÉLIGIBLE. Les refus sont tracés dans
+un journal immuable (`paper_decisions`) et un refus identique n'est ni recréé ni renvoyé sur Telegram.
+`stockhunter paper audit` (lecture seule) et `stockhunter paper replay` (copie jetable). Voir `docs/v3-4/`.
+
 ## Documentation
 - `CLAUDE.md` — règles non négociables et architecture.
 - `docs/v3/` — StockHunter 3.0 / 3.1 (audit, architecture, mise en production, rapports).

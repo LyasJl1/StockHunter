@@ -123,6 +123,17 @@ pytest -m live                      # tests réels (clés requises)
   tout import exige une déclaration de droits ; places importées = mode recherche (jamais présentées à jour).
 - Ajouter une place : `docs/v3-2/sources.md` (« Ajouter une place »). Conventions : `docs/v3-2/conventions.md`.
 
+## Paper trading (3.4)
+- Une seule formule de taille, au plan, à l'exécution et au laboratoire : `trading/rules.risk_size` avec le risque
+  par action TOUS FRAIS COMPRIS (`risk_per_share`) ; quantité = min(max risque, max achat, limites). Jamais de
+  position au-delà du budget de risque, jamais de levier, quantités entières.
+- `plan_from_scan` évalue chaque (scan, action) une fois et écrit `paper_decisions` (immuable, empreinte + `repeat_of`) ;
+  plan créé seulement si ÉLIGIBLE. Ne jamais modifier une décision ni une position passée.
+- Un plan n'est pas un trade : tableau de bord et rapports séparent plans / positions / exécutions / performance.
+- `paper replay` ne s'exécute que sur une copie locale (refus sinon) ; `process(until=...)` pour rejouer sans futur.
+- Aucune stratégie n'est validée tant que < 30 trades clôturés (`paper.stats`) : ne pas changer les paramètres
+  pour produire plus de trades.
+
 ## Règles de recherche (v3)
 - Toute hypothèse est écrite dans docs/research/ et commitée AVANT d'être exécutée ; tout test va dans
   `stockhunter/lab/registry.json` (jamais de suppression). Le seuil tient compte de toute la famille de tests.

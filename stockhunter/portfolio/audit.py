@@ -121,7 +121,9 @@ def audit(engine: Engine) -> dict[str, Any]:
     })
     if _r(sm["equity"]) != out["recalcul"]["valeur_journal"]:
         anomalies.append(f"valeur dashboard {_r(sm['equity'])} ≠ recalcul journal {out['recalcul']['valeur_journal']}")
-    if sm["trades_total"] != sm["open"] + sm["closed"]:
+    # 3.4 : le tableau de bord n'affiche plus `trades_total` (plans + positions mêlés) ; on vérifie qu'il sépare
+    if "plans" not in sm or sm["plans"]["crees"] != len(trades) or \
+            sm["positions_resume"]["ouvertes"] + sm["positions_resume"]["cloturees"] != sm["open"] + sm["closed"]:
         anomalies.append(f"le dashboard compte {sm['trades_total']} « trades » dont {sm['planned']} plans et "
                          f"{sm['cancelled']} annulés : un plan n'est pas un trade")
     out["anomalies"] = anomalies
